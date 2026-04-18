@@ -50,8 +50,31 @@ c3d cinematica_directa( motores mot){
 	c3d vuelta;
 	motoresg m = conv_grados(mot);
 
-	vuelta.z=m.base;
+	//1 vuelta son 8mm
+	vuelta.z= (uint16_t)(m.base *8/360);
 
+	//ec cinematica directa
 
 	return vuelta;
 }
+
+
+//////////////////////////////////////////////////////
+//3. CINEMATICA INVERSA
+
+motores cinematica_inversa( c3d cor){
+
+	motoresg m;
+
+	//1 vuelta son 8mm
+	m.base= (uint16_t)(cor.z *360/8);
+
+	//ec cinematica inversa
+
+
+	
+	motores vuelta = conv_entero(m);
+
+	return vuelta;
+}
+
