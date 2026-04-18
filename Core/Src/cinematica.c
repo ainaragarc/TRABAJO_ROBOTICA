@@ -6,9 +6,17 @@
 
 c3d plano_dibujo( c2d cor){
 	c3d vuelta;
-	vuelta.z = cor.z;
+
+	//Nos aseguramos de que este dentro del lienzo
+	if (c2d.z<0) c2d.z=0;
+	if (c2d.z>200) c2d.z=200;
+	if (c2d.y<0) c2d.y=0;
+	if (c2d.y>200) c2d.y=200;
+	
+	//transformación a sistema 3d 
+	vuelta.z = cor.z + SEPz;
 	vuelta.y = (uint16_t)(cor.y * ANG) + SEPy;
-	vuelta.x = (uint16_t)(cor.y * ANG) + SEPz;
+	vuelta.x = (uint16_t)(cor.y * ANG) + SEPx;
 	return vuelta;
 }
 
