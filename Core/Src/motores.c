@@ -71,10 +71,10 @@ uint16_t entero_revol(float angulo){ return convertir_int(angulo, 0.0f, 180.0f, 
 
 //paso a paso (VAN CON SENSORICA)
 float grados_paso (uint16_t angulo){
-		float vuelta = angulo * 80;
+		//float vuelta = angulo * 80; //esto ya no lo tengo yo tan claro, REVISAR
 		//FALTA LA CONVERSION DE LO QUE SEA QUE DE EL SENSOR
 
-		return vuelta;
+		return angulo;
 
 }
 

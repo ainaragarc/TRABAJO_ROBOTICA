@@ -21,66 +21,83 @@
  */
 
 //MEDIDA DE LOS ESLABONES
-#define LBASE 430u //longitud base (corredera) en mm
-#define L1 20u //longitud elabon 1
-#define L2 20u //longitud elabon 2
-#define L3 20u //longitud elabon 3 (revolver + boli)
+#define LBASE 430 //longitud base (corredera) en mm
+#define L1 20 //longitud elabon 1
+#define L2 20 //longitud elabon 2
+#define L3 20 //longitud elabon 3 (revolver + boli)
 
 //OTRAS MEDIDAS IMPORTANTES
-#define SEPz 20u //separacion entre el inicio de la corredera y el inicio del lienzo
-#define SEPx 20u //separacion entre centro de gravedad del robot (la movil) HORIZONTAL
-#define SEPy 20u //separacion entre centro de gravedad del robot (la movil) VERTICAL
-#define plano 200u //separacion entre centro de gravedad del robot (la movil) VERTICAL
+#define SEPz 20 //separacion entre el inicio de la corredera y el inicio del lienzo
+#define SEPx 20 //separacion entre centro de gravedad del robot (la movil) HORIZONTAL
+#define SEPy 20 //separacion entre centro de gravedad del robot (la movil) VERTICAL
+#define plano 200 //separacion entre centro de gravedad del robot (la movil) VERTICAL
 
 #define ANG (0.70710678f) //inclinacion a 45º
+#define ANGinicial (0.0f) //angulo incial debido al final de carrera en grados
 
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
 //COORDENADAS
 
+//CUIDADITO CON EL SIGNO
 typedef struct
 {
-	uint16_t z;
-	uint16_t y;
+	int16_t z;
+	int16_t y;
 
 } c2d; //SON LAS COORDENADAS 2D DE DIBUJO (se reserva x para el movimiento rotativo del robot)
 
 typedef struct
 {
-	uint16_t x;
-	uint16_t y;
-	uint16_t z;
+	int16_t x;
+	int16_t y;
+	int16_t z;
 } c3d;
 
 typedef struct
 {
-	uint16_t base;
-	uint16_t r1;
-	uint16_t r2;
-	uint16_t r3;
+	c3d coor;
+	float ang;
+} c4d; //coordenadas 3d mas la orientacion de la punta
+
+typedef struct
+{
+	int16_t base;
+	int16_t r1;
+	int16_t r2;
+	int16_t r3;
 } motores;
 
 typedef struct
 {
-	float base;
+	float base; //LA BASE TMB VA EN GRADOS NO EN DESPLAZAMIENTO, MUCHO CUIDADITO
 	float r1;
 	float r2;
 	float r3;
 } motoresg;
 
+float radianes (float g){return (g* (M_PI / 180.0));}
+float grados (float r){return (r* (180.0 / M_PI));}
+motores conv_entero( motoresg mot);
+motoresg conv_grados( motores mot);
+motoresg conv_grados_rad( motoresg mot);
 
 //1. PASO DE COORDENADAS A DIBUJO
 //asumiendo que el 0,0 esta abajo a la izquierda
 c3d plano_dibujo( c2d cor);
 
-motores conv_entero( motoresg mot);
-motoresg conv_grados( motores mot);
 
 
 //2. CINEMATICA DIRECTA
-c3d cinematica_directa( motores mot);
+//DEVUELVE LAS COORDENADAS DDE LA PUNTA
+c4d cinematica_directa( motores mot);
+
 
 //3. CINEMATICA DIRECTA
-motores cinematica_inversa( c3d cor);
+motores cinematica_inversa( c4d cor);
 
 //4. SEGUIR TRAYECTORIAS
 

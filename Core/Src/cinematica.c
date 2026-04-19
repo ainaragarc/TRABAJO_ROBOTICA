@@ -8,15 +8,15 @@ c3d plano_dibujo( c2d cor){
 	c3d vuelta;
 
 	//Nos aseguramos de que este dentro del lienzo
-	if (c2d.z<0) c2d.z=0;
-	if (c2d.z>200) c2d.z=200;
-	if (c2d.y<0) c2d.y=0;
-	if (c2d.y>200) c2d.y=200;
+	if (cor.z<0) cor.z=0;
+	if (cor.y<0) cor.y=0;
+	if (cor.z>200) cor.z=200;
+	if (cor.y>200) cor.y=200;
 	
 	//transformación a sistema 3d 
 	vuelta.z = cor.z + SEPz;
-	vuelta.y = (uint16_t)(cor.y * ANG) + SEPy;
-	vuelta.x = (uint16_t)(cor.y * ANG) + SEPx;
+	vuelta.y = (int16_t)(cor.y * ANG) + SEPy;
+	vuelta.x = (int16_t)(cor.y * ANG) + SEPx;
 	return vuelta;
 }
 
@@ -41,33 +41,64 @@ motoresg conv_grados( motores mot){
 }
 
 
+motoresg conv_grados_rad( motoresg mot){
+	mot.base = grados(mot.base);
+	mot.r1 = grados(mot.r1);
+	mot.r2 = grados(mot.r2);
+	mot.r3 = grados(mot.r3);
+	return mot;
+}
+
 
 //////////////////////////////////////////////////////
 //2. CINEMATICA DIRECTA
 
-c3d cinematica_directa( motores mot){
+c4d cinematica_directa( motores mot){
 
-	c3d vuelta;
-	motoresg m = conv_grados(mot);
+	c4d vuelta = {0};
+	motores m = mot;
 
 	//1 vuelta son 8mm
-	vuelta.z= (uint16_t)(m.base *8/360);
+	vuelta.coor.z= (int16_t)roundf((m.base *8/360));
+
+	/*
+	PROBLEMA, TIENE CEGUERA DE 44º
+	si es 179->3mm
+	si es 180->4mm
+	si es 224->4mm
+	si es 225->5mm
+	*/
 
 	//ec cinematica directa
+
+	//angulos en radianes
+	float t1= radianes(-m.r1);
+	float t2= radianes(-90-ANGinicial-m.r2);
+	float t3=radianes(90 - m.r3);
+
+	//algunas operaciones para que sea menos insufrible
+	//cos(theta1)sen(theta2)+sen(theta1)cos(theta2)
+	float a=cosf(t1)*sinf(t2)+sinf(t1)*cosf(t2);
+
+	vuelta.coor.x= (int16_t)roundf((-L1*cosf(t1)+L2*cosf(t1+t2)+L3*(cosf(t3)*cosf(t1+t2)-sinf(t3)*a)));
+	vuelta.coor.y= (int16_t)roundf((-L1*sinf(t1)+L2*a+L3*(cosf(t3)*a+sinf(t3)*cosf(t1+t2))));
+	vuelta.ang=acosf(cosf(t3)*cosf(t1+t2)-sinf(t3)*a);
+	vuelta.ang=grados(vuelta.ang);
 
 	return vuelta;
 }
 
 
+
 //////////////////////////////////////////////////////
 //3. CINEMATICA INVERSA
 
-motores cinematica_inversa( c3d cor){
+motores cinematica_inversa( c4d cor){
 
 	motoresg m;
 
-	//1 vuelta son 8mm
-	m.base= (uint16_t)(cor.z *360/8);
+	//1 vuelta son 8mm, probablemente tmb sufra ceguera
+	m.base= (int16_t)(cor.coor.z *360/8);
 
 	//ec cinematica inversa
 
