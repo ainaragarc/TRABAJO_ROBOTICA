@@ -77,16 +77,21 @@ c4d cinematica_directa( motores mot){
 	//ec cinematica directa
 
 	//angulos en radianes
+	/* SE CAMBIAN PORQUE SOY IMBECIL, desde el 0,0 tenian que estar obligaados a hacer mas de 180º
 	float t1= radianes(-m.r1);
 	float t2= radianes(-90-ANGinicial-m.r2);
 	float t3=radianes(90 - m.r3);
+	*/
+	float t1= radianes(-m.r1);
+	float t2= radianes(-m.r2);
+	float t3=radianes(-m.r3);
 
 	//algunas operaciones para que sea menos insufrible
 	//cos(theta1)sen(theta2)+sen(theta1)cos(theta2)
 	//float a=cosf(t1)*sinf(t2)+sinf(t1)*cosf(t2)=sinf(t1+t2)
 
-	vuelta.coor.x= (int16_t)roundf((-L1*cosf(t1)+L2*cosf(t1+t2)+L3*(cosf(t3)*cosf(t1+t2)-sinf(t3)*sinf(t1+t2))));
-	vuelta.coor.y= (int16_t)roundf((-L1*sinf(t1)+L2*sinf(t1+t2)+L3*(cosf(t3)*sinf(t1+t2)+sinf(t3)*cosf(t1+t2))));
+	vuelta.coor.x= (int16_t)roundf(-(L1*cosf(t1)+L2*cosf(t1+t2)+L3*(cosf(t3)*cosf(t1+t2)-sinf(t3)*sinf(t1+t2))));
+	vuelta.coor.y= (int16_t)roundf(-(L1*sinf(t1)+L2*sinf(t1+t2)+L3*(cosf(t3)*sinf(t1+t2)+sinf(t3)*cosf(t1+t2))));
 	vuelta.ang=acosf(cosf(t3)*cosf(t1+t2)-sinf(t3)*sinf(t1+t2));
 	vuelta.ang=grados(vuelta.ang);
 
@@ -100,15 +105,12 @@ c4d cinematica_directa( motores mot){
 
 motores cinematica_inversa( c4d cor){
 
-	motoresg mot;
-
-	//1 vuelta son 8mm, probablemente tmb sufra ceguera
-	mot.base= (int16_t)(cor.coor.z *360/8);
+	motoresg mot={0};
 
 	//ec cinematica inversa
 
 	//1 vuelta son 8mm, probablemente tmb sufra ceguera
-	mot.base = (int16_t)roundf(cor.coor.z * 360.0f / 8.0f);
+	mot.base =roundf(cor.coor.z * 360.0f / 8.0f);
 
 	//ec cinematica inversa
 	float x = cor.coor.x-L3;
@@ -118,10 +120,14 @@ motores cinematica_inversa( c4d cor){
 	//el cos(y) por el teorema del coseno
 	float t2 = -acos(x*x + y*y - L1*L1 - L2*L2) / (2.0f * L1 * L2);
 	float t1 = atan2f(y, x) - atan2f(L2*sinf(t2), L1 + L2*cosf(t2));
+
+
+
+	mot.r1 = restriccion_angulos(roundf(180-grados(t1)));
+	mot.r2 = restriccion_angulos(roundf(90.0f + grados(t2)));
+
 	float t3 = - (t1 + t2);
 
-	mot.r1 = restriccion_angulos(roundf(-grados(t1)));
-	mot.r2 = restriccion_angulos(roundf(-90.0f - ANGinicial - grados(t2)));
 	mot.r3 = restriccion_angulos(roundf(90.0f - grados(t3)));
 	
 	motores vuelta = conv_entero(mot);
