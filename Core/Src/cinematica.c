@@ -59,7 +59,7 @@ c4d cinematica_directa( motores mot){
 	motores m = mot;
 
 	//1 vuelta son 8mm
-	vuelta.coor.z= (int16_t)roundf((m.base *8/360));
+	vuelta.coor.z= (int16_t)roundf((m.base *8/360)); 
 
 	/*
 	PROBLEMA, TIENE CEGUERA DE 44º
@@ -78,11 +78,11 @@ c4d cinematica_directa( motores mot){
 
 	//algunas operaciones para que sea menos insufrible
 	//cos(theta1)sen(theta2)+sen(theta1)cos(theta2)
-	float a=cosf(t1)*sinf(t2)+sinf(t1)*cosf(t2);
+	//float a=cosf(t1)*sinf(t2)+sinf(t1)*cosf(t2)=sinf(t1+t2)
 
-	vuelta.coor.x= (int16_t)roundf((-L1*cosf(t1)+L2*cosf(t1+t2)+L3*(cosf(t3)*cosf(t1+t2)-sinf(t3)*a)));
-	vuelta.coor.y= (int16_t)roundf((-L1*sinf(t1)+L2*a+L3*(cosf(t3)*a+sinf(t3)*cosf(t1+t2))));
-	vuelta.ang=acosf(cosf(t3)*cosf(t1+t2)-sinf(t3)*a);
+	vuelta.coor.x= (int16_t)roundf((-L1*cosf(t1)+L2*cosf(t1+t2)+L3*(cosf(t3)*cosf(t1+t2)-sinf(t3)*sinf(t1+t2))));
+	vuelta.coor.y= (int16_t)roundf((-L1*sinf(t1)+L2*sinf(t1+t2)+L3*(cosf(t3)*sinf(t1+t2)+sinf(t3)*cosf(t1+t2))));
+	vuelta.ang=acosf(cosf(t3)*cosf(t1+t2)-sinf(t3)*sinf(t1+t2));
 	vuelta.ang=grados(vuelta.ang);
 
 	return vuelta;
