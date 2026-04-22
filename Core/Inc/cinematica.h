@@ -84,6 +84,7 @@ float grados (float r){return (r* (180.0 / M_PI));}
 motores conv_entero( motoresg mot);
 motoresg conv_grados( motores mot);
 motoresg conv_grados_rad( motoresg mot);
+float restriccion_angulos(float a);
 
 //1. PASO DE COORDENADAS A DIBUJO
 //asumiendo que el 0,0 esta abajo a la izquierda

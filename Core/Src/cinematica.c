@@ -49,6 +49,11 @@ motoresg conv_grados_rad( motoresg mot){
 	return mot;
 }
 
+float restriccion_angulos(float a){
+	if (a<0) a=0;
+	else if (a>180) a=180;
+	return a;
+}
 
 //////////////////////////////////////////////////////
 //2. CINEMATICA DIRECTA
@@ -95,16 +100,36 @@ c4d cinematica_directa( motores mot){
 
 motores cinematica_inversa( c4d cor){
 
-	motoresg m;
+	motoresg mot;
 
 	//1 vuelta son 8mm, probablemente tmb sufra ceguera
-	m.base= (int16_t)(cor.coor.z *360/8);
+	mot.base= (int16_t)(cor.coor.z *360/8);
 
 	//ec cinematica inversa
 
+	//1 vuelta son 8mm, probablemente tmb sufra ceguera
+	mot.base = (int16_t)roundf(cor.coor.z * 360.0f / 8.0f);
 
+	//ec cinematica inversa
+	float x = cor.coor.x-L3;
+	float y = cor.coor.y;
+
+
+	//el cos(y) por el teorema del coseno
+	float cy = (x*x + y*y - L1*L1 - L2*L2) / (2.0f * L1 * L2);
+	//POR SI ACASO DA MAL, QUE NO SE COLAPSE LO SIGUIENTE
+	if (cy > 1.0f) cy = 1.0f;
+	if (cy < -1.0f) cy = -1.0f;
+
+	float t2 = atan2f(-sqrtf(1.0f - cy*cy), cy);
+	float t1 = atan2f(y, x) - atan2f(L2*sinf(t2), L1 + L2*cosf(t2));
+	float t3 = - (t1 + t2);
+
+	mot.r1 = restriccion_angulos(roundf(-grados(t1)));
+	mot.r2 = restriccion_angulos(roundf(-90.0f - ANGinicial - grados(t2)));
+	mot.r3 = restriccion_angulos(roundf(90.0f - grados(t3)));
 	
-	motores vuelta = conv_entero(m);
+	motores vuelta = conv_entero(mot);
 
 	return vuelta;
 }
