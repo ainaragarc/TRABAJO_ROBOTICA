@@ -116,12 +116,7 @@ motores cinematica_inversa( c4d cor){
 
 
 	//el cos(y) por el teorema del coseno
-	float cy = (x*x + y*y - L1*L1 - L2*L2) / (2.0f * L1 * L2);
-	//POR SI ACASO DA MAL, QUE NO SE COLAPSE LO SIGUIENTE
-	if (cy > 1.0f) cy = 1.0f;
-	if (cy < -1.0f) cy = -1.0f;
-
-	float t2 = atan2f(-sqrtf(1.0f - cy*cy), cy);
+	float t2 = -acos(x*x + y*y - L1*L1 - L2*L2) / (2.0f * L1 * L2);
 	float t1 = atan2f(y, x) - atan2f(L2*sinf(t2), L1 + L2*cosf(t2));
 	float t3 = - (t1 + t2);
 
