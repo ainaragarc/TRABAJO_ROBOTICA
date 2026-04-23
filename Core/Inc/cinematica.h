@@ -30,10 +30,17 @@
 #define SEPz 20 //separacion entre el inicio de la corredera y el inicio del lienzo
 #define SEPx 20 //separacion entre centro de gravedad del robot (la movil) HORIZONTAL
 #define SEPy 20 //separacion entre centro de gravedad del robot (la movil) VERTICAL
+
+#define x0 20 //separacion a la parte mas baja del lienzo
+
 #define plano 200 //separacion entre centro de gravedad del robot (la movil) VERTICAL
 
 #define ANG (0.70710678f) //inclinacion a 45º
 #define ANGinicial (0.0f) //angulo incial debido al final de carrera en grados
+
+#define vmax 20
+#define vconst 10
+#define DT_CONTROL  0.01f
 
 
 #ifndef M_PI
@@ -79,6 +86,13 @@ typedef struct
 	float r3;
 } motoresg;
 
+typedef struct {
+    float j11; //fila 1 columna 1
+    float j12; //fila 1 columna 2
+    float j21; //fila 2 columna 1
+    float j22; //fila 2 columna 2
+} jcb2;
+
 float radianes (float g){return (g* (M_PI / 180.0));}
 float grados (float r){return (r* (180.0 / M_PI));}
 motores conv_entero( motoresg mot);
@@ -98,10 +112,17 @@ c4d cinematica_directa( motores mot);
 
 
 //3. CINEMATICA DIRECTA
-motores cinematica_inversa( c3d cor);
+motoresg cinematica_inversa( c3d cor);
 
 //4. SEGUIR TRAYECTORIAS
+jcb2 jacobiana(float t1, float t2);
+void jacobiana_siguiente(float t1, float t2, float xd, float yd, float *t1d, float *t2d, float *t3d);
+
+void velocidad_dibujo_recta(c3d act, c3d objetivo, c3d *velocidades);
+void velocidad_recta(c3d act, c3d obj, c3d *velocidades);
+void velocidad_transicion(c3d act, c3d *velocidades, uint8_t flag);
 
 
+bool trayectoria(c3d obj, uint8_t *flagdibujo);
 
 #endif
