@@ -92,8 +92,8 @@ c4d cinematica_directa( motores mot){
 
 	vuelta.coor.x= (int16_t)roundf(-(L1*cosf(t1)+L2*cosf(t1+t2)+L3*(cosf(t3)*cosf(t1+t2)-sinf(t3)*sinf(t1+t2))));
 	vuelta.coor.y= (int16_t)roundf(-(L1*sinf(t1)+L2*sinf(t1+t2)+L3*(cosf(t3)*sinf(t1+t2)+sinf(t3)*cosf(t1+t2))));
-	vuelta.ang=acosf(cosf(t3)*cosf(t1+t2)+sinf(t3)*sinf(t1+t2));
-	vuelta.ang=180-grados(vuelta.ang);
+	vuelta.ang=asinf(cosf(t3)*sinf(t1+t2)+sinf(t3)*cosf(t1+t2));
+	vuelta.ang=grados(vuelta.ang);
 
 	return vuelta;
 }
