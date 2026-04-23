@@ -98,7 +98,7 @@ c4d cinematica_directa( motores mot);
 
 
 //3. CINEMATICA DIRECTA
-motores cinematica_inversa( c4d cor);
+motores cinematica_inversa( c3d cor);
 
 //4. SEGUIR TRAYECTORIAS
 

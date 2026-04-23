@@ -92,8 +92,8 @@ c4d cinematica_directa( motores mot){
 
 	vuelta.coor.x= (int16_t)roundf(-(L1*cosf(t1)+L2*cosf(t1+t2)+L3*(cosf(t3)*cosf(t1+t2)-sinf(t3)*sinf(t1+t2))));
 	vuelta.coor.y= (int16_t)roundf(-(L1*sinf(t1)+L2*sinf(t1+t2)+L3*(cosf(t3)*sinf(t1+t2)+sinf(t3)*cosf(t1+t2))));
-	vuelta.ang=acosf(cosf(t3)*cosf(t1+t2)-sinf(t3)*sinf(t1+t2));
-	vuelta.ang=grados(vuelta.ang);
+	vuelta.ang=acosf(cosf(t3)*cosf(t1+t2)+sinf(t3)*sinf(t1+t2));
+	vuelta.ang=180-grados(vuelta.ang);
 
 	return vuelta;
 }
@@ -103,32 +103,29 @@ c4d cinematica_directa( motores mot){
 //////////////////////////////////////////////////////
 //3. CINEMATICA INVERSA
 
-motores cinematica_inversa( c4d cor){
+motores cinematica_inversa( c3d cor){
 
 	motoresg mot={0};
 
 	//ec cinematica inversa
 
 	//1 vuelta son 8mm, probablemente tmb sufra ceguera
-	mot.base =roundf(cor.coor.z * 360.0f / 8.0f);
+	mot.base =roundf(cor.z * 360.0f / 8.0f);
 
 	//ec cinematica inversa
-	float x = cor.coor.x-L3;
-	float y = cor.coor.y;
+	float x = cor.x-L3;
+	float y = cor.y;
 
 
 	//el cos(y) por el teorema del coseno
-	float t2 = -acos(x*x + y*y - L1*L1 - L2*L2) / (2.0f * L1 * L2);
+	float t2 = -acos((x*x + y*y - L1*L1 - L2*L2) / (2.0f * L1 * L2));
 	float t1 = atan2f(y, x) - atan2f(L2*sinf(t2), L1 + L2*cosf(t2));
-
+	float t3 = - (t1 + t2);
 
 
 	mot.r1 = restriccion_angulos(roundf(180-grados(t1)));
-	mot.r2 = restriccion_angulos(roundf(90.0f + grados(t2)));
-
-	float t3 = - (t1 + t2);
-
-	mot.r3 = restriccion_angulos(roundf(90.0f - grados(t3)));
+	mot.r2 = restriccion_angulos(roundf(-grados(t2)));
+	mot.r3 = restriccion_angulos(roundf(- grados(t3)));
 	
 	motores vuelta = conv_entero(mot);
 
