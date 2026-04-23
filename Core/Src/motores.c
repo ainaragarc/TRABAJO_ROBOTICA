@@ -2,22 +2,29 @@
 
 static uint16_t ANGULO_1 = 0u;
 static uint16_t ANGULO_2 = 0u;
+static uint16_t ANGULO_3 = 0u;
 static uint16_t ANGULO_REVOLVER = 0u;
 
 void set_servo_1(TIM_HandleTypeDef *htim, uint16_t us)
 {
 	// Establece la posicion motor 1
 	ANGULO_1=us;
-	__HAL_TIM_SET_COMPARE(htim, TIM_CHANNEL_1, us);
+	__HAL_TIM_SET_COMPARE(htim, TIM_CHANNEL_2, us);
 }
 
 void set_servo_2(TIM_HandleTypeDef *htim, uint16_t us)
 {
 	// Establece la posicion motor 2
 	ANGULO_2=us;
-	__HAL_TIM_SET_COMPARE(htim, TIM_CHANNEL_2, us);
+	__HAL_TIM_SET_COMPARE(htim, TIM_CHANNEL_3, us);
 }
 
+void set_servo_3(TIM_HandleTypeDef *htim, uint16_t us)
+{
+	// Establece la posicion motor 2
+	ANGULO_3=us;
+	__HAL_TIM_SET_COMPARE(htim, TIM_CHANNEL_4, us);
+}
 void set_servo_revolver(TIM_HandleTypeDef *htim, uint16_t us)
 {
 	// Establece la posicion motor del revolver
@@ -27,12 +34,14 @@ void set_servo_revolver(TIM_HandleTypeDef *htim, uint16_t us)
 
 uint16_t get_servo_1(void) { return ANGULO_1; }
 uint16_t get_servo_2(void) { return ANGULO_2; }
+uint16_t get_servo_3(void) { return ANGULO_3; }
 uint16_t get_servo_revolver(void) { return ANGULO_REVOLVER; }
 
 void reset_motores(TIM_HandleTypeDef *htim){
-
-	set_servo_1(htim, 500u); //creo que 500 era el misnimo, revisare
-	set_servo_2(htim, 500u);
+	//Motores a sus posiciones iniciales
+	set_servo_1(htim, 1500u); //Motor de la base a 90º (vertical)
+	set_servo_2(htim, 1500u); // Motor del codo a 90º
+	set_servo_3(htim, 500u);  // Motor de la muñeca (no sé pero un ángulo para que no se joda)
 	set_servo_revolver(htim, 500u);
 
 }
@@ -45,8 +54,8 @@ float convertir_grados (uint16_t x, uint16_t in_min, uint16_t in_max, float out_
 {
     float res = (float)(x - in_min) * (out_max - out_min) / (float)(in_max - in_min) + out_min;
 
-    if (res < out_min) x = out_min;
-    if (res > out_max) x = out_max;
+    if (res < out_min) res = out_min;
+    if (res > out_max) res = out_max;
 
     return res;
 }
@@ -55,15 +64,15 @@ uint16_t convertir_int (float x, float in_min, float in_max, uint16_t out_min, u
 {
     float res = (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 
-    if (res < out_min) x = out_min;
-    if (res > out_max) x = out_max;
+    if (res < out_min) res = out_min;
+    if (res > out_max) res = out_max;
 
     return (uint16_t)(res + 0.5f);
 }
 
-float grados_pos(uint16_t cord){ return convertir_grados(cord, 500, 2500, 0.0f, 360.0f); }
+float grados_pos(uint16_t cord){ return  (180 -convertir_grados(cord, 500, 2500, 0.0f, 180.0f)); }
 
-uint16_t entero_pos(float angulo){ return convertir_int(angulo, 0.0f, 360.0f, 500, 2500); }
+uint16_t entero_pos(float angulo){ return (3000 - convertir_int(angulo, 0.0f, 180.0f, 500, 2500)); }
 
 float grados_revol(uint16_t cord){ return convertir_grados(cord, 950, 1950, 0.0f, 180.0f); }
 
