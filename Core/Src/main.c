@@ -42,6 +42,7 @@
 
 /* Private variables ---------------------------------------------------------*/
 TIM_HandleTypeDef htim1;
+TIM_HandleTypeDef htim5;
 
 /* USER CODE BEGIN PV */
 
@@ -51,6 +52,7 @@ TIM_HandleTypeDef htim1;
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_TIM1_Init(void);
+static void MX_TIM5_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -90,10 +92,60 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_TIM1_Init();
+  MX_TIM5_Init();
   /* USER CODE BEGIN 2 */
-  HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);	// Posicion del motor 1
-  HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2);	// Posicion del motor 2
-  HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);	// Posicion del motor del revolver
+  // Posiciones iniciales de los motores
+  __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_2, 1500u);  // Motor 1 parado
+  __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_3, entero_pos(90.0f));  // Motor 2 codo
+  __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_4, entero_pos(0.0f)); // Motor 3 muñeca
+  __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_3, entero_pos(45.0f)); // Revólver
+
+  HAL_TIM_PWM_Start(&htim5, TIM_CHANNEL_2);	// Velocidad del motor de la base
+  HAL_TIM_PWM_Start(&htim5, TIM_CHANNEL_3);	// Posicion del motor del codo
+  HAL_TIM_PWM_Start(&htim5, TIM_CHANNEL_4);	// Posicion del motor de la muñeca
+  HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);	// Posición del motor del revolver
+
+  // 3. Calibración del Punto Cero
+      // Vamos a moverlos a 90 grados (centro) para poder ajustar las piezas mecánicas
+      float angulo_inicio_codo = 90.0f, angulo_fin_codo = 45.0f;
+      float angulo_inicio_muneca = 0.0f, angulo_fin_muneca = 90.0f;
+
+      __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_2, 2000u);
+      HAL_Delay(300);
+      __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_2, 1500u);
+      HAL_Delay(300);
+      set_servo_2(&htim5, entero_pos(angulo_inicio_codo));
+      //HAL_Delay(2000);
+	  set_servo_3(&htim5, entero_pos(angulo_inicio_muneca));
+	  //set_servo_revolver(&htim1, entero_revol(angulo_inicio)); //No sirve la función revol, con la otra vale
+
+	  //HAL_Delay(2000); // Esperamos a que lleguen a la posición
+
+		// Ahora los llevamos a 90 grados para el centrado físico
+		set_servo_3(&htim5, entero_pos(angulo_fin_muneca));
+		//HAL_Delay(2000);
+		set_servo_2(&htim5, entero_pos(angulo_fin_codo));
+		//set_servo_revolver(&htim1, entero_revol(angulo_fin));
+		//HAL_Delay(2000);
+      // Volvemos a la posición inincial
+		set_servo_2(&htim5, entero_pos(angulo_inicio_codo));
+	    //HAL_Delay(2000);
+	    set_servo_3(&htim5, entero_pos(angulo_inicio_muneca));
+	//Servo rotacional:
+		// --- GIRAR EN UN SENTIDO (MÁXIMA VELOCIDAD) ---
+
+		// --- PARAR EL MOTOR ---
+		// Usamos el valor central (1500us).
+
+
+		// --- PARAR DE NUEVO ---
+	    //__HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_2, 1000u);
+	    //HAL_Delay(1000);
+		__HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_2, 1500u);
+		HAL_Delay(1000);
+
+
+
 
   /* USER CODE END 2 */
 
@@ -104,6 +156,8 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+
+
   }
   /* USER CODE END 3 */
 }
@@ -194,6 +248,10 @@ static void MX_TIM1_Init(void)
   {
     Error_Handler();
   }
+  if (HAL_TIM_OC_Init(&htim1) != HAL_OK)
+  {
+    Error_Handler();
+  }
   sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
   sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
   if (HAL_TIMEx_MasterConfigSynchronization(&htim1, &sMasterConfig) != HAL_OK)
@@ -219,6 +277,11 @@ static void MX_TIM1_Init(void)
   {
     Error_Handler();
   }
+  sConfigOC.OCMode = TIM_OCMODE_TIMING;
+  if (HAL_TIM_OC_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_4) != HAL_OK)
+  {
+    Error_Handler();
+  }
   sBreakDeadTimeConfig.OffStateRunMode = TIM_OSSR_DISABLE;
   sBreakDeadTimeConfig.OffStateIDLEMode = TIM_OSSI_DISABLE;
   sBreakDeadTimeConfig.LockLevel = TIM_LOCKLEVEL_OFF;
@@ -238,6 +301,73 @@ static void MX_TIM1_Init(void)
 }
 
 /**
+  * @brief TIM5 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM5_Init(void)
+{
+
+  /* USER CODE BEGIN TIM5_Init 0 */
+
+  /* USER CODE END TIM5_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+  TIM_OC_InitTypeDef sConfigOC = {0};
+
+  /* USER CODE BEGIN TIM5_Init 1 */
+
+  /* USER CODE END TIM5_Init 1 */
+  htim5.Instance = TIM5;
+  htim5.Init.Prescaler = 49;
+  htim5.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim5.Init.Period = 19999;
+  htim5.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim5.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim5) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim5, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_Init(&htim5) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim5, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sConfigOC.OCMode = TIM_OCMODE_PWM1;
+  sConfigOC.Pulse = 0;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  if (HAL_TIM_PWM_ConfigChannel(&htim5, &sConfigOC, TIM_CHANNEL_2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_ConfigChannel(&htim5, &sConfigOC, TIM_CHANNEL_3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_ConfigChannel(&htim5, &sConfigOC, TIM_CHANNEL_4) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM5_Init 2 */
+
+  /* USER CODE END TIM5_Init 2 */
+  HAL_TIM_MspPostInit(&htim5);
+
+}
+
+/**
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
@@ -249,6 +379,7 @@ static void MX_GPIO_Init(void)
   /* USER CODE END MX_GPIO_Init_1 */
 
   /* GPIO Ports Clock Enable */
+  __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOE_CLK_ENABLE();
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */

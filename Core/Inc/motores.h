@@ -6,6 +6,7 @@
 
 void set_servo_1(TIM_HandleTypeDef *htim, uint16_t us);
 void set_servo_2(TIM_HandleTypeDef *htim, uint16_t us);
+void set_servo_3(TIM_HandleTypeDef *htim, uint16_t us);
 void set_servo_revolver(TIM_HandleTypeDef *htim, uint16_t us);
 
 uint16_t get_servo_1(void);
