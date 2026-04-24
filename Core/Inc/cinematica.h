@@ -39,6 +39,8 @@
 #define ANGinicial (0.0f) //angulo incial debido al final de carrera en grados
 
 #define vmax 20
+#define amax 2.0f
+
 #define vconst 10
 #define DT_CONTROL  0.01f
 

@@ -2,6 +2,9 @@
 
 static Color color_act=COLOR1;
 static motores motores_actuales;
+static float vx_prev=0.0f;
+static float vy_prev=0.0f;
+static float vz_prev=0.0f;
 
 //static float margen_igualdad = 0.5f;
 
@@ -86,10 +89,10 @@ c3d plano_dibujo( c2d cor){
 	c3d vuelta;
 
 	//Nos aseguramos de que este dentro del lienzo
-	if (cor.z<0) cor.z=0;
-	if (cor.y<0) cor.y=0;
-	if (cor.z>200) cor.z=200;
-	if (cor.y>200) cor.y=200;
+	if (cor.z<SEPz) cor.z=SEPz;
+	if (cor.y<SEPy) cor.y=SEPy;
+	if (cor.z>(SEPz+200)) cor.z=SEPz+200;
+	if (cor.y>(SEPy+200)) cor.y=SEPy+200;
 
 	//transformación a sistema 3d
 	vuelta.z = cor.z + SEPz;
@@ -105,7 +108,7 @@ c3d plano_dibujo( c2d cor){
 c4d cinematica_directa( motores mot){
 
 	c4d vuelta = {0};
-	motores m = mot;
+	motoresg m = conv_grados(mot);
 
 	//1 vuelta son 8mm
 	vuelta.coor.z= (int16_t)roundf((m.base *8/360)); 
@@ -182,17 +185,14 @@ motoresg cinematica_inversa( c3d cor){
 
 
 jcb2 jacobiana(float t1, float t2) { //MUY IMPORTANTE ESTO VA EN RADIANES
-
-
 	///REVISAR SIGBNO
-
 
 	jcb2 J;
 
-    J.j11 =  L1 * sinf(t1) + L2 * sinf(t2);
-    J.j12 =  L2 * sinf(t2);
-    J.j21 = -L1 * cosf(t1) - L2 * cosf(t2);
-    J.j22 = -L2 * cosf(t2);
+    J.j11 =  L1 * sinf(t1) + L2 * sinf(t1+t2);
+    J.j12 =  L2 * sinf(t1+t2);
+    J.j21 = -L1 * cosf(t1) - L2 * cosf(t1+t2);
+    J.j22 = -L2 * cosf(t1+t2);
 
     return J;
 }
@@ -302,22 +302,49 @@ void velocidad_recta(c3d act, c3d obj, c3d *velocidades)
     float dy = (float)(obj.y - act.y);
     float dz = (float)(obj.z - act.z);
 
-    float K = 0.1f;   // ganancia de aceleracion
+    float K = 0.1f;
 
     float vx = K * dx;
     float vy = K * dy;
     float vz = K * dz;
 
+
+
     // limitar velocidad máxima en XY
     float vxy = sqrtf(vx*vx + vy*vy);
     if (vxy > vmax) {
-    	float esc = vmax / vxy;
-    	vx *= esc;
-    	vy *= esc;
+        float esc = vmax / vxy;
+        vx *= esc;
+        vy *= esc;
     }
 
     // limitar velocidad en Z
     if (fabsf(vz) > vmax) vz = (vz > 0 ? vmax : -vmax);
+
+
+
+    //FILTRO PARA ACELERACIONES
+    //diferencia entre velocidad anterior y la deseada
+    float dvx = vx - vx_prev;
+    float dvy = vy - vy_prev;
+    float dvz = vz - vz_prev;
+
+    float max_step = amax * DT_CONTROL;
+
+    //limitar cambio de velocidad
+    if (dvx >  max_step) dvx =  max_step;
+    if (dvx < -max_step) dvx = -max_step;
+
+    if (dvy >  max_step) dvy =  max_step;
+    if (dvy < -max_step) dvy = -max_step;
+
+    if (dvz >  max_step) dvz =  max_step;
+    if (dvz < -max_step) dvz = -max_step;
+
+    // aplicar suavizado
+    float vx_def = vx_prev + dvx;
+    float vy_def = vy_prev + dvy;
+    float vz_def = vz_prev + dvz;
 
 
     /*
@@ -328,13 +355,17 @@ void velocidad_recta(c3d act, c3d obj, c3d *velocidades)
     velocidades->z = (int16_t)(fabsf(vz) < 1.0f ? (vz > 0 ? 1 : -1) : vz);
     */
 
-    if (fabsf(vx) < 1.0f) vx = 0.0f;
-    if (fabsf(vy) < 1.0f) vy = 0.0f;
-    if (fabsf(vz) < 1.0f) vz = 0.0f;
+    if (fabsf(vx_def) < 1.0f) vx_def = 0.0f;
+    if (fabsf(vy_def) < 1.0f) vy_def = 0.0f;
+    if (fabsf(vz_def) < 1.0f) vz_def = 0.0f;
 
-    velocidades->x = (int16_t)vx;
-    velocidades->y = (int16_t)vy;
-    velocidades->z = (int16_t)vz;
+    velocidades->x = (int16_t)vx_def;
+    velocidades->y = (int16_t)vy_def;
+    velocidades->z = (int16_t)vz_def;
+
+    vx_prev = vx_def;
+    vy_prev = vy_def;
+    vz_prev = vz_def;
 
 }
 
@@ -370,6 +401,10 @@ bool trayectoria(c3d obj, uint8_t *flagdibujo){
     c4d act = cinematica_directa(motores_actuales);
 
     if ((act.coor.x==obj.x)&&(act.coor.y==obj.y)&&(act.coor.z==obj.z)) {
+    	vx_prev = 0;
+    	vy_prev = 0;
+    	vz_prev = 0;
+
         if (*flagdibujo==1 || *flagdibujo==5)*flagdibujo=2;
         else if (*flagdibujo==3 || *flagdibujo==4)*flagdibujo=0;
         return true;
@@ -428,7 +463,6 @@ bool trayectoria(c3d obj, uint8_t *flagdibujo){
 	vuelta.base = z_vuelta * 360.0f / 8.0f;
 
 	motores_actuales = conv_entero(vuelta);
-
 
 	return false;
 }
