@@ -67,5 +67,3 @@ ctrlp.root
 *.html
 Debug/
 Release/
-.metadata/
-.vs/
