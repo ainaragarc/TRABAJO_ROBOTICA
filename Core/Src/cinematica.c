@@ -370,8 +370,8 @@ void velocidad_recta(c3d act, c3d obj, c3d *velocidades)
 void velocidad_transicion(c3d act, c3d obj, c3d *velocidades, uint8_t flag)
 {
     int16_t dir; //= (flag == 1 ? 1 : -1);
-    if (flag==1 || flag==5)dir=1;
-    else if (flag==3 || flag==4)dir=-1;
+    if (flag==1)dir=1;
+    else if (flag==3)dir=-1;
     else return;
 
     velocidades->x = dir * (vconst / 2);
@@ -392,8 +392,6 @@ void velocidad_transicion(c3d act, c3d obj, c3d *velocidades, uint8_t flag)
  flag=1_> transicion a dibujo
  flag=2-> dibujo
  flag=3->transicion a no dibuja
- flag=4->cambio de color desde dibujo (se aleja)
- flag=5->dibujo desde cambio de color (se acerca)
  */
 bool trayectoria(c3d obj, uint8_t *flagdibujo){
     c4d act = cinematica_directa(motores_actuales);
@@ -416,9 +414,7 @@ bool trayectoria(c3d obj, uint8_t *flagdibujo){
     		break;
 
     	case 1:
-    	case 5:
     	case 3:
-    	case 4:
     		velocidad_transicion(act.coor, obj, &velocidades, *flagdibujo);
     		break;
     	case 2:
@@ -465,5 +461,92 @@ bool trayectoria(c3d obj, uint8_t *flagdibujo){
 
 	return false;
 }
+
+
+
+//bool trayectoria_cutre(c3d obj, uint8_t *flagdibujo){
+//    c4d act4 = cinematica_directa(motores_actuales);
+//    c3d act = act4.coor;
+//    if (act.x == obj.x && act.y == obj.y && act.z == obj.z) return true;
+//
+//    //bresenham
+//
+//    //distancias
+//    int dx = abs(obj.x - act.x);
+//    int dy = abs(obj.y -act.y);
+//    int dz = abs(obj.z - act.z);
+//
+//    //signos
+//    int sx = (act.x < obj.x) ? 1 : -1;
+//    int sy = (act.y < obj.y) ? 1 : -1;
+//    int sz = (act.z < obj.z) ? 1 : -1;
+//
+//    //si estoy en 1 o 3 estoy en transicion
+//    //si estoy en 0 o 2 avanzo el doble de rapido
+//    int paso = (*flagdibujo == 1 || *flagdibujo == 3) ? 1 : 2;
+//
+//    //dominante en x
+//    if (dx >= dy && dx >= dz) {
+//    	act.x += sx * paso;
+//    	if ((sx > 0 && act.x > obj.x) || (sx < 0 && act.x < obj.x)) act.x = obj.x;
+//    	if (dx != 0) {
+//    		int dy_step = (dy * paso) / dx;
+//    		int dz_step = (dz * paso) / dx;
+//    		if (dy_step == 0 && dy != 0) dy_step = 1 * sy;
+//    		if (dz_step == 0 && dz != 0) dz_step = 1 * sz;
+//    		act.y += dy_step;
+//    		act.z += dz_step;
+//            }
+//        }
+//
+//    //dominante en y
+//    else if (dy >= dx && dy >= dz) {
+//    	act.y += sy * paso;
+//    	if ((sy > 0 && act.y > obj.y) || (sy < 0 && act.y < obj.y)) act.y = obj.y;
+//    	if (dy != 0) {
+//    		int dx_step = (dx * paso) / dy;
+//    		int dz_step = (dz * paso) / dy;
+//    		if (dx_step == 0 && dx != 0) dx_step = 1 * sx;
+//    		if (dz_step == 0 && dz != 0) dz_step = 1 * sz;
+//    		act.x += dx_step;
+//    		act.z += dz_step;
+//    	}
+//    }
+//    //dominante en z
+//    else {
+//    	act.z += sz * paso;
+//    	if ((sz > 0 && act.z > obj.z) || (sz < 0 && act.z < obj.z)) act.z = obj.z;
+//
+//    	if (dz != 0) {
+//    		int dx_step = (dx * paso) / dz;
+//    		int dy_step = (dy * paso) / dz;
+//    		if (dx_step == 0 && dx != 0) dx_step = 1 * sx;
+//    		if (dy_step == 0 && dy != 0) dy_step = 1 * sy;
+//
+//    		act.x += dx_step;
+//    		act.y += dy_step;
+//    	}
+//    }
+//
+//
+//    //saturacion, me lo ha dicho chat
+//    if (sx > 0 && act.x > obj.x) act.x = obj.x;
+//    if (sx < 0 && act.x < obj.x) act.x = obj.x;
+//    if (sy > 0 && act.y > obj.y) act.y = obj.y;
+//    if (sy < 0 && act.y < obj.y) act.y = obj.y;
+//    if (sz > 0 && act.z > obj.z) act.z = obj.z;
+//    if (sz < 0 && act.z < obj.z) act.z = obj.z;
+//
+//
+//    //cinemática inversa
+//    c3d siguiente = { act.x, act.y, act.z };
+//    motoresg motg = cinematica_inversa(siguiente);
+//    motores_actuales = conv_entero(motg);
+//
+//    return false;
+//
+//}
+
+
 
 

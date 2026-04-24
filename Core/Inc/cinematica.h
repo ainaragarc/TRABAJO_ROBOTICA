@@ -134,4 +134,6 @@ void velocidad_transicion(c3d act, c3d obj, c3d *velocidades, uint8_t flag);
 
 bool trayectoria(c3d obj, uint8_t *flagdibujo);
 
+//bool trayectoria_cutre(c3d obj, uint8_t *flagdibujo);
+
 #endif
