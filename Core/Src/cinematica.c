@@ -1,6 +1,8 @@
 #include "cinematica.h"
 
-static motores motores_actuales;
+static motores motores_actuales; //esto deberia ser la posicion de los motores leido por los sensores
+//static motores motores_actuales=LECTURA_MOTORES();
+
 static float vx_prev=0.0f;
 static float vy_prev=0.0f;
 static float vz_prev=0.0f;
@@ -59,8 +61,6 @@ bool dentro_rango( c3d cor){
 
 	return true;
 }
-
-
 
 
 //////////////////////////////////////////////////////
@@ -179,8 +179,6 @@ motoresg cinematica_inversa( c3d cor){
 
 //////////////////////////////////////////////////////
 //4. JACOBIANO
-
-
 
 jcb2 jacobiana(float t1, float t2) { //MUY IMPORTANTE ESTO VA EN RADIANES
 	///REVISAR SIGBNO
@@ -394,6 +392,8 @@ void velocidad_transicion(c3d act, c3d obj, c3d *velocidades, uint8_t flag)
  flag=3->transicion a no dibuja
  */
 bool trayectoria(c3d obj, uint8_t *flagdibujo){
+	//DEBERIA PILLAR LA LECTURA DE LOS SENSORES
+	//motores_actuales=LECTURA_MOTORES(); O ALGO ASI
     c4d act = cinematica_directa(motores_actuales);
 
     if ((act.coor.x==obj.x)&&(act.coor.y==obj.y)&&(act.coor.z==obj.z)) {
@@ -465,6 +465,8 @@ bool trayectoria(c3d obj, uint8_t *flagdibujo){
 
 
 //bool trayectoria_cutre(c3d obj, uint8_t *flagdibujo){
+//		//DEBERIA PILLAR LA LECTURA DE LOS SENSORES
+//		//motores_actuales=LECTURA_MOTORES(); O ALGO ASI
 //    c4d act4 = cinematica_directa(motores_actuales);
 //    c3d act = act4.coor;
 //    if (act.x == obj.x && act.y == obj.y && act.z == obj.z) return true;
