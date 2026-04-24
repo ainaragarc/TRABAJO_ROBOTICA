@@ -71,11 +71,10 @@ bool cambio_color_revolver(Color c, TIM_HandleTypeDef *htim){
 
 
 //AQUI FALTA UUNA LLAMNADICA A LOS MOTORES
-void dibujar(uint8_t flag_parada, uint8_t flag_ON, TIM_HandleTypeDef *htim_r1, TIM_HandleTypeDef *htim_r2, TIM_HandleTypeDef *htim_r3, TIM_HandleTypeDef *htim_base, TIM_HandleTypeDef *htim_revolver){
+void dibujar(motores *movimiento , uint8_t flag_parada, uint8_t flag_ON, TIM_HandleTypeDef *htim_revolver){
 
 	c3d objetivo;
 	bool i=false;
-	motores movimiento;
 
 	if (flag_parada>0){ flag_pasos=0; }
 
@@ -97,7 +96,7 @@ void dibujar(uint8_t flag_parada, uint8_t flag_ON, TIM_HandleTypeDef *htim_r1, T
 		flag_trayctorias=0;
 		objetivo = plano_no_dibujo(dibujo.p[color_act][npuntos]); //punto objetivo
 		i = trayectoria(objetivo, &flag_trayctorias);
-		movimiento=motores_actual(); //donde tiene que ir los motores una vez calculada la trayectoria
+		*movimiento=motores_actual(); //donde tiene que ir los motores una vez calculada la trayectoria
 		//mueve_robot(movimiento, htim_r1, htim_r2, htim_r3, htim_base);//FUNCION QUE CAMBIA LOS MOTORES
 
 		if (i==true){
@@ -111,7 +110,7 @@ void dibujar(uint8_t flag_parada, uint8_t flag_ON, TIM_HandleTypeDef *htim_r1, T
 		flag_trayctorias=1;
 		objetivo = plano_dibujo(dibujo.p[color_act][npuntos]); //punto objetivo
 		i= trayectoria(objetivo, &flag_trayctorias);
-		movimiento=motores_actual(); //donde tiene que ir los motores una vez calculada la trayectoria
+		*movimiento=motores_actual(); //donde tiene que ir los motores una vez calculada la trayectoria
 		//mueve_robot(movimiento, htim_r1, htim_r2, htim_r3, htim_base);//FUNCION QUE CAMBIA LOS MOTORES
 
 		if (i==true){
@@ -126,7 +125,7 @@ void dibujar(uint8_t flag_parada, uint8_t flag_ON, TIM_HandleTypeDef *htim_r1, T
 
 		objetivo = plano_dibujo(dibujo.p[color_act][npuntos]); //punto objetivo
 		i= trayectoria(objetivo, &flag_trayctorias);
-		movimiento=motores_actual(); //donde tiene que ir los motores una vez calculada la trayectoria
+		*movimiento=motores_actual(); //donde tiene que ir los motores una vez calculada la trayectoria
 		//mueve_robot(movimiento, htim_r1, htim_r2, htim_r3, htim_base);//FUNCION QUE CAMBIA LOS MOTORES
 
 		if (i==true){
@@ -142,7 +141,7 @@ void dibujar(uint8_t flag_parada, uint8_t flag_ON, TIM_HandleTypeDef *htim_r1, T
 		flag_trayctorias=3;
 		objetivo = plano_no_dibujo(dibujo.p[color_act][npuntos]); //punto objetivo
 		i= trayectoria(objetivo, &flag_trayctorias);
-		movimiento=motores_actual(); //donde tiene que ir los motores una vez calculada la trayectoria
+		*movimiento=motores_actual(); //donde tiene que ir los motores una vez calculada la trayectoria
 		//mueve_robot(movimiento, htim_r1, htim_r2, htim_r3, htim_base);//FUNCION QUE CAMBIA LOS MOTORES
 
 		if (i==true){
@@ -170,7 +169,7 @@ void dibujar(uint8_t flag_parada, uint8_t flag_ON, TIM_HandleTypeDef *htim_r1, T
 		flag_trayctorias=0;
 		//objetivo = posicion_reposo(); //POSICION RESPOSO
 		i = trayectoria(objetivo, &flag_trayctorias);
-		movimiento=motores_actual(); //donde tiene que ir los motores una vez calculada la trayectoria
+		*movimiento=motores_actual(); //donde tiene que ir los motores una vez calculada la trayectoria
 		//mueve_robot(movimiento, htim_r1, htim_r2, htim_r3, htim_base);//FUNCION QUE CAMBIA LOS MOTORES
 
 		if (flag_parada==0 && i==true){
