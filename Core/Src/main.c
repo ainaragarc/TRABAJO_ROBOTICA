@@ -21,6 +21,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include <stdbool.h>
+
 #include "motores.h"
 #include "EncoderRobot.h"
 #include "FinalDeCarrera.h"
@@ -51,14 +53,14 @@ TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim3;
 /* USER CODE BEGIN PV */
 // Encoder 1: Timer 2, 600 pulsos, rueda 65mm
-EncoderRobot encIzq(&htim2, 600, 65.0);
+EncoderRobot encIzq;
 
 // Encoder 2: Timer 3, 600 pulsos, rueda 65mm
-EncoderRobot encDer(&htim3, 600, 65.0);
+EncoderRobot encDer;
 
 
-FinalDeCarrera limiteTraslacion(GPIOA, GPIO_PIN_10);
-FinalDeCarrera limiteInclinacion(GPIOA, GPIO_PIN_11);
+FinalDeCarrera limiteTraslacion;
+FinalDeCarrera limiteInclinacion;
 
 bool peligroObstaculo = false;
 struct {
@@ -89,19 +91,7 @@ void Robot_Tick(void);
 #include <stdio.h>
 #include <math.h>
 
-//soporte para printf (Redirección UART)
-#ifdef __GNUC__
-#define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
-#else
-#define PUTCHAR_PROTOTYPE int fputc(int ch, FILE *f)
-#endif
 
-PUTCHAR_PROTOTYPE
-{
-    extern UART_HandleTypeDef huart2;
-    HAL_UART_Transmit(&huart2, (uint8_t*)&ch, 1, 0xFFFF);
-    return ch;
-}
 /* USER CODE END 0 */
 
 /**
@@ -136,6 +126,11 @@ int main(void)
   MX_TIM1_Init();
   MX_TIM5_Init();
   /* USER CODE BEGIN 2 */
+  EncoderRobot_init(&encIzq, &htim2, 600, 65.0f);
+  EncoderRobot_init(&encDer, &htim3, 600, 65.0f);
+  FinalDeCarrera_init(&limiteTraslacion,  GPIOA, GPIO_PIN_10, false);
+  FinalDeCarrera_init(&limiteInclinacion, GPIOA, GPIO_PIN_11, false);
+
   Robot_InitMotores();
   Robot_InitEncoders();
   /* USER CODE END 2 */
@@ -423,18 +418,18 @@ void Robot_InitMotores(void) {
 }
 
 void Robot_InitEncoders(void) {
-    encIzq.inicializar();
-    encDer.inicializar();
+    EncoderRobot_inicializar(&encIzq);
+    EncoderRobot_inicializar(&encDer);
     Homing_Iniciar();
 }
 
 // ── Encoders ──────────────────────────────────────────────────────────────────
 
 void Robot_ActualizarTelemetria(void) {
-    telemetria.distIzq = encIzq.getDistanciaMM();
-    telemetria.distDer = encDer.getDistanciaMM();
-    telemetria.angIzq  = encIzq.getAnguloGrados();
-    telemetria.angDer  = encDer.getAnguloGrados();
+    telemetria.distIzq = EncoderRobot_getDistanciaMM(&encIzq);
+    telemetria.distDer = EncoderRobot_getDistanciaMM(&encDer);
+    telemetria.angIzq  = EncoderRobot_getAnguloGrados(&encIzq);
+    telemetria.angDer  = EncoderRobot_getAnguloGrados(&encDer);
 }
 
 void Robot_TestEncoderManual(void) {
@@ -454,11 +449,11 @@ void Robot_TestEncoderManual(void) {
 // ── Seguridad ─────────────────────────────────────────────────────────────────
 
 void Robot_VerificarLimites(void) {
-    if (limiteTraslacion.getFlag() || limiteInclinacion.getFlag()) {
+    if (FinalDeCarrera_getFlag(&limiteTraslacion) || FinalDeCarrera_getFlag(&limiteInclinacion)) {
         __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_2, 1500u);
         peligroObstaculo = true;
-        limiteTraslacion.resetFlag();
-        limiteInclinacion.resetFlag();
+        FinalDeCarrera_resetFlag(&limiteTraslacion);
+        FinalDeCarrera_resetFlag(&limiteInclinacion);
     }
 }
 
@@ -509,13 +504,13 @@ void Robot_Tick(void) {
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
     if (GPIO_Pin == GPIO_PIN_4) {
-        encIzq.registrarVueltaZ();
+        EncoderRobot_registrarVueltaZ(&encIzq);
     } else if (GPIO_Pin == GPIO_PIN_5) {
-        encDer.registrarVueltaZ();
+        EncoderRobot_registrarVueltaZ(&encDer);
     } else if (GPIO_Pin == GPIO_PIN_10) {
-        limiteTraslacion.onInterrupcion();
+        FinalDeCarrera_onInterrupcion(&limiteTraslacion);
     } else if (GPIO_Pin == GPIO_PIN_11) {
-        limiteInclinacion.onInterrupcion();
+        FinalDeCarrera_onInterrupcion(&limiteInclinacion);
     }
 }
 

@@ -1,42 +1,42 @@
 #include "EncoderRobot.h"
 
-EncoderRobot::EncoderRobot(TIM_HandleTypeDef* htim, uint32_t ppr, float diametro) {
-    _htim = htim;
-    _ppr = ppr;
-    _diametroRueda = diametro;
-    _vueltas = 0;
+void EncoderRobot_init(EncoderRobot* e, TIM_HandleTypeDef* htim, uint32_t ppr, float diametro) {
+    e->htim = htim;
+    e->ppr = ppr;
+    e->diametroRueda = diametro;
+    e->vueltas = 0;
 }
 
-void EncoderRobot::inicializar() {
-    HAL_TIM_Encoder_Start(_htim, TIM_CHANNEL_ALL);
+void EncoderRobot_inicializar(EncoderRobot* e) {
+    HAL_TIM_Encoder_Start(e->htim, TIM_CHANNEL_ALL);
 }
 
-void EncoderRobot::registrarVueltaZ() {
-    _vueltas++;
-    __HAL_TIM_SET_COUNTER(_htim, 0);
+void EncoderRobot_registrarVueltaZ(EncoderRobot* e) {
+    e->vueltas++;
+    __HAL_TIM_SET_COUNTER(e->htim, 0);
 }
 
-void EncoderRobot::reset() {
+void EncoderRobot_reset(EncoderRobot* e) {
     __disable_irq();
-    __HAL_TIM_SET_COUNTER(_htim, 0);
-    _vueltas = 0;
+    __HAL_TIM_SET_COUNTER(e->htim, 0);
+    e->vueltas = 0;
     __enable_irq();
 }
 
-int32_t EncoderRobot::getPulsosTotales() {
-    // Lectura atómica: evita race condition entre el contador hardware y _vueltas
+int32_t EncoderRobot_getPulsosTotales(EncoderRobot* e) {
+    // Lectura atómica: evita race condition entre el contador hardware y vueltas
     // que se incrementa en la ISR del canal Z.
     __disable_irq();
-    int16_t conteoHardware = (int16_t)__HAL_TIM_GET_COUNTER(_htim);
-    int32_t vueltas = _vueltas;
+    int16_t conteoHardware = (int16_t)__HAL_TIM_GET_COUNTER(e->htim);
+    int32_t vueltas = e->vueltas;
     __enable_irq();
-    return conteoHardware + (vueltas * (int32_t)_ppr);
+    return conteoHardware + (vueltas * (int32_t)e->ppr);
 }
 
-float EncoderRobot::getAnguloGrados() {
-    return (float)(getPulsosTotales() % _ppr) * (360.0f / _ppr);
+float EncoderRobot_getAnguloGrados(EncoderRobot* e) {
+    return (float)(EncoderRobot_getPulsosTotales(e) % e->ppr) * (360.0f / e->ppr);
 }
 
-float EncoderRobot::getDistanciaMM() {
-    return ((float)getPulsosTotales() / _ppr) * (3.14159f * _diametroRueda);
+float EncoderRobot_getDistanciaMM(EncoderRobot* e) {
+    return ((float)EncoderRobot_getPulsosTotales(e) / e->ppr) * (3.14159f * e->diametroRueda);
 }

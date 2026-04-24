@@ -1,38 +1,27 @@
 #include "Homing.h"
 #include "EncoderRobot.h"
 #include "FinalDeCarrera.h"
+#include <stdbool.h>
 #include <stdio.h>
 #include <math.h>
 
-// ── Parámetros ajustables ─────────────────────────────────────────────────────
-// Si el motor va en sentido contrario, intercambia HOME y RETROCESO del eje.
-
 #define PWM_PARADO          1500u
+#define PWM_T_HOME          1600u
+#define PWM_T_RETROCESO     1400u
+#define PWM_I_HOME          1400u
+#define PWM_I_RETROCESO     1600u
+#define HOMING_TIMEOUT_MS   10000u
+#define HOMING_BACKOFF_MM   5.0f
 
-#define PWM_T_HOME          1600u   // Traslación → derecha (hacia fin de carrera)
-#define PWM_T_RETROCESO     1400u   // Traslación → izquierda (alejarse)
-
-#define PWM_I_HOME          1400u   // Inclinación → hacia el lienzo
-#define PWM_I_RETROCESO     1600u   // Inclinación → alejarse del lienzo
-
-#define HOMING_TIMEOUT_MS   10000u  // Aborta si un eje tarda más de 10 s
-#define HOMING_BACKOFF_MM   5.0f    // mm que retrocede tras tocar el switch
-
-// ── Estado interno ────────────────────────────────────────────────────────────
-
-static HomingEstado estado  = HOMING_IDLE;
+static HomingEstado estado   = HOMING_IDLE;
 static uint32_t     t_inicio = 0;
 
-// ── Recursos definidos en main.c ──────────────────────────────────────────────
-
-extern EncoderRobot   encIzq;            // encoder traslación  (TIM2)
-extern EncoderRobot   encDer;            // encoder inclinación (TIM3)
-extern FinalDeCarrera limiteTraslacion;  // PA10 → fin de carrera traslación
-extern FinalDeCarrera limiteInclinacion; // PA11 → fin de carrera inclinación
-extern TIM_HandleTypeDef htim5;          // canal traslación en CH2
-extern TIM_HandleTypeDef htim1;          // canal inclinación en CH1
-
-// ── Helpers privados de motor ─────────────────────────────────────────────────
+extern EncoderRobot   encIzq;
+extern EncoderRobot   encDer;
+extern FinalDeCarrera limiteTraslacion;
+extern FinalDeCarrera limiteInclinacion;
+extern TIM_HandleTypeDef htim5;
+extern TIM_HandleTypeDef htim1;
 
 static void mover_traslacion(uint32_t pwm) {
     __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_2, pwm);
@@ -47,11 +36,9 @@ static void parar_todo(void) {
     mover_inclinacion(PWM_PARADO);
 }
 
-// ── API pública ───────────────────────────────────────────────────────────────
-
 void Homing_Iniciar(void) {
-    estado    = HOMING_TRASLACION;
-    t_inicio  = HAL_GetTick();
+    estado   = HOMING_TRASLACION;
+    t_inicio = HAL_GetTick();
     mover_traslacion(PWM_T_HOME);
     printf("HOMING: traslacion iniciada\r\n");
 }
@@ -61,7 +48,7 @@ bool Homing_EstaCompleto(void) {
 }
 
 bool Homing_EstaActivo(void) {
-    return (estado != HOMING_IDLE    &&
+    return (estado != HOMING_IDLE     &&
             estado != HOMING_COMPLETO &&
             estado != HOMING_ERROR);
 }
@@ -69,11 +56,6 @@ bool Homing_EstaActivo(void) {
 HomingEstado Homing_GetEstado(void) {
     return estado;
 }
-
-// ── Máquina de estados ────────────────────────────────────────────────────────
-//
-// Se llama cada iteración del bucle principal (Robot_Tick).
-// No bloquea: cada case comprueba una condición y transiciona si se cumple.
 
 void Homing_Tick(void) {
     switch (estado) {
@@ -83,7 +65,6 @@ void Homing_Tick(void) {
         case HOMING_ERROR:
             return;
 
-        // ── 1. Mover hacia el fin de carrera de traslación ──────────────────
         case HOMING_TRASLACION:
             if (HAL_GetTick() - t_inicio > HOMING_TIMEOUT_MS) {
                 parar_todo();
@@ -91,10 +72,10 @@ void Homing_Tick(void) {
                 printf("HOMING ERROR: timeout traslacion\r\n");
                 break;
             }
-            if (limiteTraslacion.getFlag()) {
-                limiteTraslacion.resetFlag();
+            if (FinalDeCarrera_getFlag(&limiteTraslacion)) {
+                FinalDeCarrera_resetFlag(&limiteTraslacion);
                 mover_traslacion(PWM_PARADO);
-                encIzq.reset();                         // contador en 0 en el switch
+                EncoderRobot_reset(&encIzq);
                 mover_traslacion(PWM_T_RETROCESO);
                 t_inicio = HAL_GetTick();
                 estado   = HOMING_RETROCESO_T;
@@ -102,11 +83,10 @@ void Homing_Tick(void) {
             }
             break;
 
-        // ── 2. Retroceder hasta BACKOFF_MM y fijar el home real ─────────────
         case HOMING_RETROCESO_T:
-            if (fabsf(encIzq.getDistanciaMM()) >= HOMING_BACKOFF_MM) {
+            if (fabsf(EncoderRobot_getDistanciaMM(&encIzq)) >= HOMING_BACKOFF_MM) {
                 mover_traslacion(PWM_PARADO);
-                encIzq.reset();                         // 0 mm = posición home útil
+                EncoderRobot_reset(&encIzq);
                 mover_inclinacion(PWM_I_HOME);
                 t_inicio = HAL_GetTick();
                 estado   = HOMING_INCLINACION;
@@ -114,7 +94,6 @@ void Homing_Tick(void) {
             }
             break;
 
-        // ── 3. Mover hacia el fin de carrera de inclinación ─────────────────
         case HOMING_INCLINACION:
             if (HAL_GetTick() - t_inicio > HOMING_TIMEOUT_MS) {
                 parar_todo();
@@ -122,10 +101,10 @@ void Homing_Tick(void) {
                 printf("HOMING ERROR: timeout inclinacion\r\n");
                 break;
             }
-            if (limiteInclinacion.getFlag()) {
-                limiteInclinacion.resetFlag();
+            if (FinalDeCarrera_getFlag(&limiteInclinacion)) {
+                FinalDeCarrera_resetFlag(&limiteInclinacion);
                 mover_inclinacion(PWM_PARADO);
-                encDer.reset();
+                EncoderRobot_reset(&encDer);
                 mover_inclinacion(PWM_I_RETROCESO);
                 t_inicio = HAL_GetTick();
                 estado   = HOMING_RETROCESO_I;
@@ -133,11 +112,10 @@ void Homing_Tick(void) {
             }
             break;
 
-        // ── 4. Retroceder y fijar home de inclinación ────────────────────────
         case HOMING_RETROCESO_I:
-            if (fabsf(encDer.getDistanciaMM()) >= HOMING_BACKOFF_MM) {
+            if (fabsf(EncoderRobot_getDistanciaMM(&encDer)) >= HOMING_BACKOFF_MM) {
                 mover_inclinacion(PWM_PARADO);
-                encDer.reset();                         // 0 mm = posición home útil
+                EncoderRobot_reset(&encDer);
                 estado = HOMING_COMPLETO;
                 printf("HOMING: COMPLETO. Robot listo.\r\n");
             }

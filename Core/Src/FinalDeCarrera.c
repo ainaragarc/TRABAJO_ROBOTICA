@@ -1,30 +1,35 @@
 #include "FinalDeCarrera.h"
+#include <stdbool.h>
 
-FinalDeCarrera::FinalDeCarrera(GPIO_TypeDef* puerto, uint16_t pin, bool invertido)
-    : _puerto(puerto), _pin(pin), _invertido(invertido), _flag(false), _ultimoDisparo(0) {}
-
-bool FinalDeCarrera::estaPresionado() {
-    GPIO_PinState estado = HAL_GPIO_ReadPin(_puerto, _pin);
-    return _invertido ? (estado == GPIO_PIN_SET) : (estado == GPIO_PIN_RESET);
+void FinalDeCarrera_init(FinalDeCarrera* f, GPIO_TypeDef* puerto, uint16_t pin, bool invertido) {
+    f->puerto        = puerto;
+    f->pin           = pin;
+    f->invertido     = invertido;
+    f->flag          = false;
+    f->ultimoDisparo = 0;
 }
 
-// Llamar desde HAL_GPIO_EXTI_Callback. Filtra rebotes mecánicos del microswitch.
-void FinalDeCarrera::onInterrupcion() {
+bool FinalDeCarrera_estaPresionado(FinalDeCarrera* f) {
+    GPIO_PinState estado = HAL_GPIO_ReadPin(f->puerto, f->pin);
+    return f->invertido ? (estado == GPIO_PIN_SET) : (estado == GPIO_PIN_RESET);
+}
+
+void FinalDeCarrera_onInterrupcion(FinalDeCarrera* f) {
     uint32_t ahora = HAL_GetTick();
-    if ((ahora - _ultimoDisparo) >= DEBOUNCE_MS && estaPresionado()) {
-        _ultimoDisparo = ahora;
-        _flag = true;
+    if ((ahora - f->ultimoDisparo) >= DEBOUNCE_MS && FinalDeCarrera_estaPresionado(f)) {
+        f->ultimoDisparo = ahora;
+        f->flag = true;
     }
 }
 
-bool FinalDeCarrera::getFlag() {
-    return _flag;
+bool FinalDeCarrera_getFlag(FinalDeCarrera* f) {
+    return f->flag;
 }
 
-void FinalDeCarrera::resetFlag() {
-    _flag = false;
+void FinalDeCarrera_resetFlag(FinalDeCarrera* f) {
+    f->flag = false;
 }
 
-uint16_t FinalDeCarrera::getPin() const {
-    return _pin;
+uint16_t FinalDeCarrera_getPin(FinalDeCarrera* f) {
+    return f->pin;
 }
