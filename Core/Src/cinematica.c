@@ -69,7 +69,7 @@ bool cambio_color_revolver(Color c, TIM_HandleTypeDef *htim){
 		set_servo_revolver(htim, 0); //rotar a 0
 		break;
 	case COLOR2:
-		set_servo_revolver(htim, 0); //rotar a 90
+		set_servo_revolver(htim, 90); //rotar a 90
 		break;
 	case COLOR3:
 		set_servo_revolver(htim, 180); //rotar a 180
@@ -111,7 +111,8 @@ c4d cinematica_directa( motores mot){
 	motoresg m = conv_grados(mot);
 
 	//1 vuelta son 8mm
-	vuelta.coor.z= (int16_t)roundf((m.base *8/360)); 
+	vuelta.coor.z= (int16_t)roundf((m.base * 8.0f) / 360.0f);
+
 
 	/*
 	PROBLEMA, TIENE CEGUERA DE 44º
