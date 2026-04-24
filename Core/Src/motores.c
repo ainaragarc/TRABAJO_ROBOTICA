@@ -1,16 +1,84 @@
 #include "motores.h"
 
-static uint16_t ANGULO_1 = 0u;
-static uint16_t ANGULO_2 = 0u;
-static uint16_t ANGULO_3 = 0u;
-static uint16_t ANGULO_REVOLVER = 0u;
+#include <math.h>
 
-void set_servo_1(TIM_HandleTypeDef *htim, uint16_t us)
-{
-	// Establece la posicion motor 1
-	ANGULO_1=us;
-	__HAL_TIM_SET_COMPARE(htim, TIM_CHANNEL_2, us);
+
+//static uint16_t ANGULO_1 = 0u;
+static uint16_t ANGULO_2 = 0u; // Ángulo del motor del codo (servo posicional)
+static uint16_t ANGULO_3 = 0u;  // Ángulo del motor de la muñeca (servo posicional)
+static uint16_t ANGULO_REVOLVER = 0u; // Ángulo del motor del revolver (servo posicional)
+
+extern TIM_HandleTypeDef htim5;
+extern TIM_HandleTypeDef htim1;
+extern bool peligroObstaculo;
+
+///////
+// MOTOR 1: SERVO ROTACIONAL
+
+EstadoMotorRotacional motor1_estado = {0};
+
+// Funciones sofisticadas con estructura estado motor
+void motor1_iniciar_giro(EncoderRobot *encoder, float grados, int8_t velocidad) {
+    motor1_estado.angulo_inicial = EncoderRobot_getAnguloGrados(encoder);
+    motor1_estado.angulo_objetivo = grados;
+    motor1_estado.velocidad = (grados > 0) ? velocidad : -velocidad;
+    motor1_estado.en_movimiento = true;
+
+    motor1_set_velocidad(&htim5, motor1_estado.velocidad);
 }
+
+void motor1_control_tick(EncoderRobot *encoder) {
+    if (!motor1_estado.en_movimiento) return;
+
+    float desplazamiento = EncoderRobot_getAnguloGrados(encoder) - motor1_estado.angulo_inicial;
+
+    if (fabsf(desplazamiento) >= fabsf(motor1_estado.angulo_objetivo) || peligroObstaculo) {
+        motor1_set_velocidad(&htim5, 0);
+        motor1_estado.en_movimiento = false;
+    }
+}
+
+// Funciones simples
+void motor1_set_velocidad(TIM_HandleTypeDef *htim, int8_t velocidad) {
+    // Mapeo simple:
+    // 0 -> 1500us (parado)
+    // 100 -> 2000us (aprox max adelante)
+    // -100 -> 1000us (aprox max atrás)
+    uint16_t us = 1500u + (velocidad * 5);
+
+    if (us < 1000) us = 1000;
+    if (us > 2000) us = 2000;
+
+    __HAL_TIM_SET_COMPARE(htim, TIM_CHANNEL_2, us);
+}
+
+// Movimiento el lazo abierto: (solo para probar un pocao
+void motor1_mover_grados_estimados(TIM_HandleTypeDef *htim, float grados, int8_t velocidad_test) {
+    if (grados == 0 || velocidad_test == 0) return;
+
+    // CALIBRACIÓN: Ajusta este valor.
+    // Es el tiempo en ms que tarda el motor en mover 1 grado a 'velocidad_test'
+    // Ejemplo: Si 360º son 2000ms -> 1º = 5.55ms
+    const float MS_POR_GRADO = 5.55f;
+
+    uint32_t tiempo_movimiento = (uint32_t)(fabsf(grados) * MS_POR_GRADO);
+
+    // Determinar dirección
+    if (grados > 0) {
+        motor1_set_velocidad(htim, velocidad_test);
+    } else {
+        motor1_set_velocidad(htim, -velocidad_test);
+    }
+
+    HAL_Delay(tiempo_movimiento);
+
+    // Frenar
+    motor1_set_velocidad(htim, 0);
+}
+
+
+///////
+// MOTORES POSICIONALES:
 
 void set_servo_2(TIM_HandleTypeDef *htim, uint16_t us)
 {
@@ -32,19 +100,52 @@ void set_servo_revolver(TIM_HandleTypeDef *htim, uint16_t us)
 	__HAL_TIM_SET_COMPARE(htim, TIM_CHANNEL_3, us);
 }
 
-uint16_t get_servo_1(void) { return ANGULO_1; }
 uint16_t get_servo_2(void) { return ANGULO_2; }
 uint16_t get_servo_3(void) { return ANGULO_3; }
 uint16_t get_servo_revolver(void) { return ANGULO_REVOLVER; }
 
 void reset_motores(TIM_HandleTypeDef *htim){
 	//Motores a sus posiciones iniciales
-	set_servo_1(htim, 1500u); //Motor de la base a 90º (vertical)
 	set_servo_2(htim, 1500u); // Motor del codo a 90º
 	set_servo_3(htim, 500u);  // Motor de la muñeca (no sé pero un ángulo para que no se joda)
 	set_servo_revolver(htim, 500u);
 
 }
+
+
+//////////
+// MOTOR PASO A PASO:
+
+EstadoStepper pap_estado = {0};
+
+void stepper_iniciar_movimiento(uint32_t pasos, uint8_t horario, uint16_t velocidad_ms) {
+    HAL_GPIO_WritePin(DIR_PAP_GPIO_Port, DIR_PAP_Pin, horario ? GPIO_PIN_SET : GPIO_PIN_RESET);
+    pap_estado.pasos_restantes = pasos;
+    pap_estado.intervalo_ms = velocidad_ms;
+    pap_estado.ultimo_tick = HAL_GetTick();
+    pap_estado.nivel_pin = false;
+}
+
+void stepper_control_tick(void) {
+    if (pap_estado.pasos_restantes == 0 || peligroObstaculo) return;
+
+    uint32_t ahora = HAL_GetTick();
+    if (ahora - pap_estado.ultimo_tick >= pap_estado.intervalo_ms) {
+        pap_estado.ultimo_tick = ahora;
+
+        // Alternar el pin de STEP para crear el flanco
+        if (!pap_estado.nivel_pin) {
+            HAL_GPIO_WritePin(STEP_PAP_GPIO_Port, STEP_PAP_Pin, GPIO_PIN_SET);
+            pap_estado.nivel_pin = true;
+        } else {
+            HAL_GPIO_WritePin(STEP_PAP_GPIO_Port, STEP_PAP_Pin, GPIO_PIN_RESET);
+            pap_estado.nivel_pin = false;
+            pap_estado.pasos_restantes--; // Se completa un paso tras el flanco de bajada
+        }
+    }
+}
+
+
 
 
 //////////////////////////////////////////////////////

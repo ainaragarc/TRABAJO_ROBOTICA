@@ -2,18 +2,55 @@
 #define INC_MOTORES_H_
 
 #include <stdint.h>
+#include <stdbool.h>
+#include "EncoderRobot.h"
 #include "stm32f4xx_hal.h"
 
-void set_servo_1(TIM_HandleTypeDef *htim, uint16_t us);
+///////
+// MOTOR 1: SERVO ROTACIONAL
+
+typedef struct {
+    bool en_movimiento;
+    float angulo_objetivo;
+    float angulo_inicial;
+    int8_t velocidad;
+} EstadoMotorRotacional;
+
+extern EstadoMotorRotacional motor1_estado;
+
+
+void motor1_set_velocidad(TIM_HandleTypeDef *htim, int8_t velocidad);
+void motor1_mover_grados_estimados(TIM_HandleTypeDef *htim, float grados, int8_t velocidad_test);
+
+
+///////
+// MOTORES POSICIONALES:
+
 void set_servo_2(TIM_HandleTypeDef *htim, uint16_t us);
 void set_servo_3(TIM_HandleTypeDef *htim, uint16_t us);
 void set_servo_revolver(TIM_HandleTypeDef *htim, uint16_t us);
 
-uint16_t get_servo_1(void);
+
 uint16_t get_servo_2(void);
+uint16_t get_servo_3(void);
 uint16_t get_servo_revolver(void);
 
 
+
+//////////
+// MOTOR PASO A PASO:
+
+typedef struct {
+    uint32_t pasos_restantes;
+    uint32_t ultimo_tick;
+    uint16_t intervalo_ms;
+    bool nivel_pin;
+} EstadoStepper;
+
+extern EstadoStepper pap_estado;
+
+void stepper_iniciar_movimiento(uint32_t pasos, uint8_t horario, uint16_t velocidad_ms);
+void stepper_control_tick(void);
 
 //CONVERSION MOTORES EN GRADOS EN ENTEROS Y VICVERSA
 

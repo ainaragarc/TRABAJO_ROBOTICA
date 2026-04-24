@@ -48,9 +48,6 @@
 TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim5;
 
-
-TIM_HandleTypeDef htim2;
-TIM_HandleTypeDef htim3;
 /* USER CODE BEGIN PV */
 // Encoder 1: Timer 2, 600 pulsos, rueda 65mm
 EncoderRobot encIzq;
@@ -126,8 +123,8 @@ int main(void)
   MX_TIM1_Init();
   MX_TIM5_Init();
   /* USER CODE BEGIN 2 */
-  EncoderRobot_init(&encIzq, &htim2, 600, 65.0f);
-  EncoderRobot_init(&encDer, &htim3, 600, 65.0f);
+  EncoderRobot_init(&encIzq, &htim1, 600, 65.0f);
+  EncoderRobot_init(&encDer, &htim1, 600, 65.0f);
   FinalDeCarrera_init(&limiteTraslacion,  GPIOA, GPIO_PIN_10, false);
   FinalDeCarrera_init(&limiteInclinacion, GPIOA, GPIO_PIN_11, false);
 
@@ -359,6 +356,7 @@ static void MX_TIM5_Init(void)
   */
 static void MX_GPIO_Init(void)
 {
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
   /* USER CODE BEGIN MX_GPIO_Init_1 */
 
   /* USER CODE END MX_GPIO_Init_1 */
@@ -366,11 +364,21 @@ static void MX_GPIO_Init(void)
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOE_CLK_ENABLE();
+  __HAL_RCC_GPIOD_CLK_ENABLE();
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOD, STEP_PAP_Pin|DIR_PAP_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pins : STEP_PAP_Pin DIR_PAP_Pin */
+  GPIO_InitStruct.Pin = STEP_PAP_Pin|DIR_PAP_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+  HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
   // Fines de carrera: PA10 (izquierdo) y PA11 (derecho)
   // Modo EXTI con PULLUP interno. El microswitch conecta a GND (contacto NO).
-  GPIO_InitTypeDef GPIO_InitStruct = {0};
   GPIO_InitStruct.Pin  = GPIO_PIN_10 | GPIO_PIN_11;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
@@ -439,8 +447,8 @@ void Robot_TestEncoderManual(void) {
     bool cambioDer = fabsf(telemetria.distDer - distAntDer) > 1.0f;
 
     if (cambioIzq || cambioDer) {
-        printf("IZQ -> Dist: %.2f mm | Ang: %.2f deg\r\n", telemetria.distIzq, telemetria.angIzq);
-        printf("DER -> Dist: %.2f mm | Ang: %.2f deg\r\n", telemetria.distDer, telemetria.angDer);
+        //printf("IZQ -> Dist: %.2f mm | Ang: %.2f deg\r\n", telemetria.distIzq, telemetria.angIzq);
+        //printf("DER -> Dist: %.2f mm | Ang: %.2f deg\r\n", telemetria.distDer, telemetria.angDer);
         distAntIzq = telemetria.distIzq;
         distAntDer = telemetria.distDer;
     }
@@ -460,21 +468,21 @@ void Robot_VerificarLimites(void) {
 // ── Debug ─────────────────────────────────────────────────────────────────────
 
 void Robot_DebugSistema(void) {
-    if (Homing_EstaActivo()) {
-        static const char* nombres[] = {
-            "IDLE","TRASLACION","RETROCESO_T",
-            "INCLINACION","RETROCESO_I","COMPLETO","ERROR"
+/*    if (Homing_EstaActivo()) {
+        //static const char* nombres[] = {
+        //    "IDLE","TRASLACION","RETROCESO_T",
+        //    "INCLINACION","RETROCESO_I","COMPLETO","ERROR"
         };
-        printf("HOMING [%s]\r\n", nombres[Homing_GetEstado()]);
+        //printf("HOMING [%s]\r\n", nombres[Homing_GetEstado()]);
         return;
     }
     if (peligroObstaculo) {
-        printf("ALERTA! Final de carrera activado.\r\n");
+        //printf("ALERTA! Final de carrera activado.\r\n");
     } else {
-        printf("IZQ:%.2f mm  DER:%.2f mm\r\n", telemetria.distIzq, telemetria.distDer);
-    }
-}
+        //printf("IZQ:%.2f mm  DER:%.2f mm\r\n", telemetria.distIzq, telemetria.distDer);
 
+  }*/
+}
 // ── Bucle principal ───────────────────────────────────────────────────────────
 
 void Robot_Tick(void) {
@@ -483,6 +491,8 @@ void Robot_Tick(void) {
     if (!Homing_EstaCompleto()) return;
 
     uint32_t tick = HAL_GetTick();
+
+    stepper_control_tick();
 
     static uint32_t t_encoder = 0;
     if (tick - t_encoder >= 10) {
