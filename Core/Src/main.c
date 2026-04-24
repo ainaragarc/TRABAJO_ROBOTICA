@@ -22,7 +22,9 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "motores.h"
-
+#include "EncoderRobot.h"
+#include "FinalDeCarrera.h"
+#include "Homing.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -44,8 +46,27 @@
 TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim5;
 
-/* USER CODE BEGIN PV */
 
+TIM_HandleTypeDef htim2;
+TIM_HandleTypeDef htim3;
+/* USER CODE BEGIN PV */
+// Encoder 1: Timer 2, 600 pulsos, rueda 65mm
+EncoderRobot encIzq(&htim2, 600, 65.0);
+
+// Encoder 2: Timer 3, 600 pulsos, rueda 65mm
+EncoderRobot encDer(&htim3, 600, 65.0);
+
+
+FinalDeCarrera limiteTraslacion(GPIOA, GPIO_PIN_10);
+FinalDeCarrera limiteInclinacion(GPIOA, GPIO_PIN_11);
+
+bool peligroObstaculo = false;
+struct {
+    float distIzq;
+    float distDer;
+    float angIzq;
+    float angDer;
+} telemetria;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -54,12 +75,33 @@ static void MX_GPIO_Init(void);
 static void MX_TIM1_Init(void);
 static void MX_TIM5_Init(void);
 /* USER CODE BEGIN PFP */
-
+void Robot_InitMotores(void);
+void Robot_InitEncoders(void);
+void Robot_ActualizarTelemetria(void);
+void Robot_TestEncoderManual(void);
+void Robot_DebugSistema(void);
+void Robot_VerificarLimites(void);
+void Robot_Tick(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+#include <stdio.h>
+#include <math.h>
 
+//soporte para printf (Redirección UART)
+#ifdef __GNUC__
+#define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
+#else
+#define PUTCHAR_PROTOTYPE int fputc(int ch, FILE *f)
+#endif
+
+PUTCHAR_PROTOTYPE
+{
+    extern UART_HandleTypeDef huart2;
+    HAL_UART_Transmit(&huart2, (uint8_t*)&ch, 1, 0xFFFF);
+    return ch;
+}
 /* USER CODE END 0 */
 
 /**
@@ -94,59 +136,8 @@ int main(void)
   MX_TIM1_Init();
   MX_TIM5_Init();
   /* USER CODE BEGIN 2 */
-  // Posiciones iniciales de los motores
-  __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_2, 1500u);  // Motor 1 parado
-  __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_3, entero_pos(90.0f));  // Motor 2 codo
-  __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_4, entero_pos(0.0f)); // Motor 3 muñeca
-  __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_3, entero_pos(45.0f)); // Revólver
-
-  HAL_TIM_PWM_Start(&htim5, TIM_CHANNEL_2);	// Velocidad del motor de la base
-  HAL_TIM_PWM_Start(&htim5, TIM_CHANNEL_3);	// Posicion del motor del codo
-  HAL_TIM_PWM_Start(&htim5, TIM_CHANNEL_4);	// Posicion del motor de la muñeca
-  HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);	// Posición del motor del revolver
-
-  // 3. Calibración del Punto Cero
-      // Vamos a moverlos a 90 grados (centro) para poder ajustar las piezas mecánicas
-      float angulo_inicio_codo = 90.0f, angulo_fin_codo = 45.0f;
-      float angulo_inicio_muneca = 0.0f, angulo_fin_muneca = 90.0f;
-
-      __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_2, 2000u);
-      HAL_Delay(300);
-      __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_2, 1500u);
-      HAL_Delay(300);
-      set_servo_2(&htim5, entero_pos(angulo_inicio_codo));
-      //HAL_Delay(2000);
-	  set_servo_3(&htim5, entero_pos(angulo_inicio_muneca));
-	  //set_servo_revolver(&htim1, entero_revol(angulo_inicio)); //No sirve la función revol, con la otra vale
-
-	  //HAL_Delay(2000); // Esperamos a que lleguen a la posición
-
-		// Ahora los llevamos a 90 grados para el centrado físico
-		set_servo_3(&htim5, entero_pos(angulo_fin_muneca));
-		//HAL_Delay(2000);
-		set_servo_2(&htim5, entero_pos(angulo_fin_codo));
-		//set_servo_revolver(&htim1, entero_revol(angulo_fin));
-		//HAL_Delay(2000);
-      // Volvemos a la posición inincial
-		set_servo_2(&htim5, entero_pos(angulo_inicio_codo));
-	    //HAL_Delay(2000);
-	    set_servo_3(&htim5, entero_pos(angulo_inicio_muneca));
-	//Servo rotacional:
-		// --- GIRAR EN UN SENTIDO (MÁXIMA VELOCIDAD) ---
-
-		// --- PARAR EL MOTOR ---
-		// Usamos el valor central (1500us).
-
-
-		// --- PARAR DE NUEVO ---
-	    //__HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_2, 1000u);
-	    //HAL_Delay(1000);
-		__HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_2, 1500u);
-		HAL_Delay(1000);
-
-
-
-
+  Robot_InitMotores();
+  Robot_InitEncoders();
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -156,8 +147,7 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-
-
+      Robot_Tick();
   }
   /* USER CODE END 3 */
 }
@@ -383,11 +373,151 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOE_CLK_ENABLE();
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
+  // Fines de carrera: PA10 (izquierdo) y PA11 (derecho)
+  // Modo EXTI con PULLUP interno. El microswitch conecta a GND (contacto NO).
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
+  GPIO_InitStruct.Pin  = GPIO_PIN_10 | GPIO_PIN_11;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
+  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 2, 0);
+  HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
   /* USER CODE END MX_GPIO_Init_2 */
 }
 
 /* USER CODE BEGIN 4 */
+
+// ── Inicialización ────────────────────────────────────────────────────────────
+
+void Robot_InitMotores(void) {
+    __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_2, 1500u);
+    __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_3, entero_pos(90.0f));
+    __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_4, entero_pos(0.0f));
+    __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_3, entero_pos(45.0f));
+
+    HAL_TIM_PWM_Start(&htim5, TIM_CHANNEL_2);
+    HAL_TIM_PWM_Start(&htim5, TIM_CHANNEL_3);
+    HAL_TIM_PWM_Start(&htim5, TIM_CHANNEL_4);
+    HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);  // Motor inclinación
+    HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);  // Revólver
+
+    // Secuencia de centrado mecánico (bloqueante, solo en arranque)
+    float ang_codo_ini = 90.0f, ang_codo_fin = 45.0f;
+    float ang_muneca_ini = 0.0f, ang_muneca_fin = 90.0f;
+
+    __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_2, 2000u);
+    HAL_Delay(300);
+    __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_2, 1500u);
+    HAL_Delay(300);
+
+    set_servo_2(&htim5, entero_pos(ang_codo_ini));
+    set_servo_3(&htim5, entero_pos(ang_muneca_ini));
+    set_servo_3(&htim5, entero_pos(ang_muneca_fin));
+    set_servo_2(&htim5, entero_pos(ang_codo_fin));
+    set_servo_2(&htim5, entero_pos(ang_codo_ini));
+    set_servo_3(&htim5, entero_pos(ang_muneca_ini));
+
+    __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_2, 1500u);
+    HAL_Delay(1000);
+}
+
+void Robot_InitEncoders(void) {
+    encIzq.inicializar();
+    encDer.inicializar();
+    Homing_Iniciar();
+}
+
+// ── Encoders ──────────────────────────────────────────────────────────────────
+
+void Robot_ActualizarTelemetria(void) {
+    telemetria.distIzq = encIzq.getDistanciaMM();
+    telemetria.distDer = encDer.getDistanciaMM();
+    telemetria.angIzq  = encIzq.getAnguloGrados();
+    telemetria.angDer  = encDer.getAnguloGrados();
+}
+
+void Robot_TestEncoderManual(void) {
+    static float distAntIzq = 0.0f, distAntDer = 0.0f;
+
+    bool cambioIzq = fabsf(telemetria.distIzq - distAntIzq) > 1.0f;
+    bool cambioDer = fabsf(telemetria.distDer - distAntDer) > 1.0f;
+
+    if (cambioIzq || cambioDer) {
+        printf("IZQ -> Dist: %.2f mm | Ang: %.2f deg\r\n", telemetria.distIzq, telemetria.angIzq);
+        printf("DER -> Dist: %.2f mm | Ang: %.2f deg\r\n", telemetria.distDer, telemetria.angDer);
+        distAntIzq = telemetria.distIzq;
+        distAntDer = telemetria.distDer;
+    }
+}
+
+// ── Seguridad ─────────────────────────────────────────────────────────────────
+
+void Robot_VerificarLimites(void) {
+    if (limiteTraslacion.getFlag() || limiteInclinacion.getFlag()) {
+        __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_2, 1500u);
+        peligroObstaculo = true;
+        limiteTraslacion.resetFlag();
+        limiteInclinacion.resetFlag();
+    }
+}
+
+// ── Debug ─────────────────────────────────────────────────────────────────────
+
+void Robot_DebugSistema(void) {
+    if (Homing_EstaActivo()) {
+        static const char* nombres[] = {
+            "IDLE","TRASLACION","RETROCESO_T",
+            "INCLINACION","RETROCESO_I","COMPLETO","ERROR"
+        };
+        printf("HOMING [%s]\r\n", nombres[Homing_GetEstado()]);
+        return;
+    }
+    if (peligroObstaculo) {
+        printf("ALERTA! Final de carrera activado.\r\n");
+    } else {
+        printf("IZQ:%.2f mm  DER:%.2f mm\r\n", telemetria.distIzq, telemetria.distDer);
+    }
+}
+
+// ── Bucle principal ───────────────────────────────────────────────────────────
+
+void Robot_Tick(void) {
+    Homing_Tick();
+
+    if (!Homing_EstaCompleto()) return;
+
+    uint32_t tick = HAL_GetTick();
+
+    static uint32_t t_encoder = 0;
+    if (tick - t_encoder >= 10) {
+        t_encoder = tick;
+        Robot_ActualizarTelemetria();
+        Robot_TestEncoderManual();
+    }
+
+    static uint32_t t_debug = 0;
+    if (tick - t_debug >= 100) {
+        t_debug = tick;
+        Robot_DebugSistema();
+    }
+
+    Robot_VerificarLimites();
+}
+
+// ── Interrupciones ────────────────────────────────────────────────────────────
+
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
+    if (GPIO_Pin == GPIO_PIN_4) {
+        encIzq.registrarVueltaZ();
+    } else if (GPIO_Pin == GPIO_PIN_5) {
+        encDer.registrarVueltaZ();
+    } else if (GPIO_Pin == GPIO_PIN_10) {
+        limiteTraslacion.onInterrupcion();
+    } else if (GPIO_Pin == GPIO_PIN_11) {
+        limiteInclinacion.onInterrupcion();
+    }
+}
 
 /* USER CODE END 4 */
 
