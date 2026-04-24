@@ -136,7 +136,7 @@ c4d cinematica_directa( motores mot){
 
 	vuelta.coor.x= (int16_t)roundf(-(L1*cosf(t1)+L2*cosf(t1+t2) +L3*(cosf(t3+t1+t2))));
 	vuelta.coor.y= (int16_t)roundf(-(L1*sinf(t1)+L2*sinf(t1+t2) +L3*(sinf(t3+t1+t2))));
-	vuelta.ang= asinf(sinf(t1+t2+t3));
+	vuelta.ang= (t1+t2+t3); //asinf(sinf(t1+t2+t3))
 	vuelta.ang=grados(vuelta.ang);
 
 	return vuelta;
@@ -279,7 +279,8 @@ void velocidad_dibujo_recta(c3d act, c3d objetivo, c3d *velocidades)
     }
 
     //se mueve hacia el punto a velocidad cte
-    velocidades->z = vconst * (dz > 0 ? 1 : -1);
+    if (dz == 0) velocidades->z = 0;
+    else velocidades->z = vconst * (dz > 0 ? 1 : -1);
 
 
 }
@@ -318,9 +319,22 @@ void velocidad_recta(c3d act, c3d obj, c3d *velocidades)
     // limitar velocidad en Z
     if (fabsf(vz) > vmax) vz = (vz > 0 ? vmax : -vmax);
 
+
+    /*
+    ME HA DICHO CHAT QUE PUEDE METER VIBRACIONES MUY CHUNGAS
+
     velocidades->x = (int16_t)(fabsf(vx) < 1.0f ? (vx > 0 ? 1 : -1) : vx);
     velocidades->y = (int16_t)(fabsf(vy) < 1.0f ? (vy > 0 ? 1 : -1) : vy);
     velocidades->z = (int16_t)(fabsf(vz) < 1.0f ? (vz > 0 ? 1 : -1) : vz);
+    */
+
+    if (fabsf(vx) < 1.0f) vx = 0.0f;
+    if (fabsf(vy) < 1.0f) vy = 0.0f;
+    if (fabsf(vz) < 1.0f) vz = 0.0f;
+
+    velocidades->x = (int16_t)vx;
+    velocidades->y = (int16_t)vy;
+    velocidades->z = (int16_t)vz;
 
 }
 
@@ -383,13 +397,13 @@ bool trayectoria(c3d obj, uint8_t *flagdibujo){
     		break;
     }
 
-	motoresg mot=conv_grados_rad(conv_grados(motores_actuales));
+	motoresg mot=conv_grados(motores_actuales);
 
 	//AQUI???
 	//SIGNOS REVISAR!!!!!!!!!!!
-	float t1 = -mot.r1;
-	float t2 = -mot.r2;
-	float t3 = -mot.r3;
+	float t1= radianes(-mot.r1);
+	float t2= radianes(-mot.r2);
+	float t3= radianes(-mot.r3);
 
 	float t1dot, t2dot, t3dot;
 	jacobiana_siguiente(t1, t2, velocidades.x, velocidades.y, &t1dot, &t2dot, &t3dot);
