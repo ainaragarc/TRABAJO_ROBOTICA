@@ -1,6 +1,5 @@
 #include "cinematica.h"
 
-static Color color_act=COLOR1;
 static motores motores_actuales;
 static float vx_prev=0.0f;
 static float vy_prev=0.0f;
@@ -8,6 +7,12 @@ static float vz_prev=0.0f;
 
 //static float margen_igualdad = 0.5f;
 
+c4d posicion_actual(void){ return cinematica_directa(motores_actuales); }
+motoresg motoresg_actual(void){ return conv_grados(motores_actuales); }
+motores motores_actual(void){ return (motores_actuales); }
+
+float radianes (float g){return (g* (M_PI / 180.0));}
+float grados (float r){return (r* (180.0 / M_PI));}
 
 
 motores conv_entero( motoresg mot){
@@ -55,30 +60,6 @@ bool dentro_rango( c3d cor){
 	return true;
 }
 
-//////////////////////////////////////////////////////
-//CAMBIO DE COLOR
-
-bool cambio_color_revolver(Color c, TIM_HandleTypeDef *htim){
-	if (c==color_act) return true;
-    c4d act = cinematica_directa(motores_actuales);
-
-	if (!dentro_rango(act.coor)) return false; //SUGNIFICA QUE ESTA PEGADO AL LIENZO Y QUE HAY QUE SEPARARLO
-
-	switch (c){
-	case COLOR1:
-		set_servo_revolver(htim, 0); //rotar a 0
-		break;
-	case COLOR2:
-		set_servo_revolver(htim, 90); //rotar a 90
-		break;
-	case COLOR3:
-		set_servo_revolver(htim, 180); //rotar a 180
-		break;
-	}
-
-	color_act=c;
-	return true;
-}
 
 
 
@@ -89,15 +70,31 @@ c3d plano_dibujo( c2d cor){
 	c3d vuelta;
 
 	//Nos aseguramos de que este dentro del lienzo
-	if (cor.z<SEPz) cor.z=SEPz;
-	if (cor.y<SEPy) cor.y=SEPy;
-	if (cor.z>(SEPz+200)) cor.z=SEPz+200;
-	if (cor.y>(SEPy+200)) cor.y=SEPy+200;
+	if (cor.z<0) cor.z=SEPz;
+	if (cor.y<0) cor.y=SEPy;
+	if (cor.z>(200)) cor.z=SEPz+200;
+	if (cor.y>(200)) cor.y=SEPy+200;
 
 	//transformación a sistema 3d
 	vuelta.z = cor.z + SEPz;
 	vuelta.y = (int16_t)(cor.y * ANG) + SEPy;
 	vuelta.x = (int16_t)(cor.y * ANG) + SEPx;
+	return vuelta;
+}
+
+c3d plano_no_dibujo( c2d cor){
+	c3d vuelta;
+
+	//Nos aseguramos de que este dentro del lienzo
+	if (cor.z<0) cor.z=SEPz;
+	if (cor.y<0) cor.y=SEPy;
+	if (cor.z>(200)) cor.z=SEPz+200;
+	if (cor.y>(200)) cor.y=SEPy+200;
+
+	//transformación a sistema 3d
+	vuelta.z = cor.z + SEPz;
+	vuelta.y = (int16_t)(cor.y * ANG) + SEPy;
+	vuelta.x = (int16_t)(cor.y * ANG) + SEPx-20;
 	return vuelta;
 }
 
@@ -264,9 +261,9 @@ void velocidad_dibujo_recta(c3d act, c3d objetivo, c3d *velocidades)
     float d_xy = sqrtf(dx*dx + dy*dy);
 
     if (d_xy < 0.001f && dz== 0) {
-            velocidades->x = 0.0f;
-            velocidades->y = 0.0f;
-            velocidades->z = 0.0f;
+            velocidades->x = 0;
+            velocidades->y = 0;
+            velocidades->z = 0;
             return;
     }
 
@@ -405,9 +402,10 @@ bool trayectoria(c3d obj, uint8_t *flagdibujo){
     	vx_prev = 0;
     	vy_prev = 0;
     	vz_prev = 0;
-
+    	/*
         if (*flagdibujo==1 || *flagdibujo==5)*flagdibujo=2;
         else if (*flagdibujo==3 || *flagdibujo==4)*flagdibujo=0;
+        */
         return true;
     }
 
@@ -467,3 +465,5 @@ bool trayectoria(c3d obj, uint8_t *flagdibujo){
 
 	return false;
 }
+
+
