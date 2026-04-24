@@ -93,6 +93,10 @@ typedef struct {
     float j22; //fila 2 columna 2
 } jcb2;
 
+typedef enum { COLOR1 = 0, COLOR2, COLOR3 } Color;
+
+
+
 float radianes (float g){return (g* (M_PI / 180.0));}
 float grados (float r){return (r* (180.0 / M_PI));}
 motores conv_entero( motoresg mot);
@@ -120,8 +124,7 @@ void jacobiana_siguiente(float t1, float t2, float xd, float yd, float *t1d, flo
 
 void velocidad_dibujo_recta(c3d act, c3d objetivo, c3d *velocidades);
 void velocidad_recta(c3d act, c3d obj, c3d *velocidades);
-void velocidad_transicion(c3d act, c3d *velocidades, uint8_t flag);
-
+void velocidad_transicion(c3d act, c3d obj, c3d *velocidades, uint8_t flag);
 
 bool trayectoria(c3d obj, uint8_t *flagdibujo);
 

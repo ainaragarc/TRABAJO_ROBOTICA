@@ -1,39 +1,11 @@
 #include "cinematica.h"
 
-
+static Color color_act=COLOR1;
 static motores motores_actuales;
 
 //static float margen_igualdad = 0.5f;
 
 
-//////////////////////////////////////////////////////
-//1. PASO DE COORDENADAS A DIBUJO
-
-c3d plano_dibujo( c2d cor){
-	c3d vuelta;
-
-	//Nos aseguramos de que este dentro del lienzo
-	if (cor.z<0) cor.z=0;
-	if (cor.y<0) cor.y=0;
-	if (cor.z>200) cor.z=200;
-	if (cor.y>200) cor.y=200;
-	
-	//transformación a sistema 3d 
-	vuelta.z = cor.z + SEPz;
-	vuelta.y = (int16_t)(cor.y * ANG) + SEPy;
-	vuelta.x = (int16_t)(cor.y * ANG) + SEPx;
-	return vuelta;
-}
-
-bool dentro_rango( c3d cor){
-
-	//Nos aseguramos de que este dentro del lienzo
-	if (cor.z<0 || cor.z>LBASE) return false;
-	if (cor.y<20 || cor.y>SEPy+plano) return false;
-	if (cor.x>x0+cor.y-20) return false;
-
-	return true;
-}
 
 motores conv_entero( motoresg mot){
 	motores i;
@@ -69,6 +41,63 @@ float restriccion_angulos(float a){
 	else if (a>180) a=180;
 	return a;
 }
+
+bool dentro_rango( c3d cor){
+
+	//Nos aseguramos de que este dentro del lienzo
+	if (cor.z<0 || cor.z>LBASE) return false;
+	if (cor.y<20 || cor.y>SEPy+plano) return false;
+	if (cor.x>x0+cor.y-20) return false;
+
+	return true;
+}
+
+//////////////////////////////////////////////////////
+//CAMBIO DE COLOR
+
+bool cambio_color_revolver(Color c, TIM_HandleTypeDef *htim){
+	if (c==color_act) return true;
+    c4d act = cinematica_directa(motores_actuales);
+
+	if (!dentro_rango(act.coor)) return false; //SUGNIFICA QUE ESTA PEGADO AL LIENZO Y QUE HAY QUE SEPARARLO
+
+	switch (c){
+	case COLOR1:
+		set_servo_revolver(htim, 0); //rotar a 0
+		break;
+	case COLOR2:
+		set_servo_revolver(htim, 0); //rotar a 90
+		break;
+	case COLOR3:
+		set_servo_revolver(htim, 180); //rotar a 180
+		break;
+	}
+
+	color_act=c;
+	return true;
+}
+
+
+
+//////////////////////////////////////////////////////
+//1. PASO DE COORDENADAS A DIBUJO
+
+c3d plano_dibujo( c2d cor){
+	c3d vuelta;
+
+	//Nos aseguramos de que este dentro del lienzo
+	if (cor.z<0) cor.z=0;
+	if (cor.y<0) cor.y=0;
+	if (cor.z>200) cor.z=200;
+	if (cor.y>200) cor.y=200;
+
+	//transformación a sistema 3d
+	vuelta.z = cor.z + SEPz;
+	vuelta.y = (int16_t)(cor.y * ANG) + SEPy;
+	vuelta.x = (int16_t)(cor.y * ANG) + SEPx;
+	return vuelta;
+}
+
 
 //////////////////////////////////////////////////////
 //2. CINEMATICA DIRECTA
@@ -295,17 +324,18 @@ void velocidad_recta(c3d act, c3d obj, c3d *velocidades)
 
 }
 
-void velocidad_transicion(c3d act, c3d *velocidades, uint8_t flag)
+void velocidad_transicion(c3d act, c3d obj, c3d *velocidades, uint8_t flag)
 {
-    int16_t dir = (flag == 1 ? 1 : -1);
-    velocidades->x = dir * (vconst / 2);
+    int16_t dir; //= (flag == 1 ? 1 : -1);
+    if (flag==1 || flag==5)dir=1;
+    else if (flag==3 || flag==4)dir=-1;
+    else return;
 
+    velocidades->x = dir * (vconst / 2);
     velocidades->z = 0;
     velocidades->y = 0;
 
-    if (act.x==(x0+act.y)) {
-    	velocidades->x = 0;
-    }
+    if (act.x==obj.x) velocidades->x = 0;
 
 }
 
@@ -319,13 +349,16 @@ void velocidad_transicion(c3d act, c3d *velocidades, uint8_t flag)
  flag=1_> transicion a dibujo
  flag=2-> dibujo
  flag=3->transicion a no dibuja
+ flag=4->cambio de color desde dibujo (se aleja)
+ flag=5->dibujo desde cambio de color (se acerca)
  */
 bool trayectoria(c3d obj, uint8_t *flagdibujo){
     c4d act = cinematica_directa(motores_actuales);
 
     if ((act.coor.x==obj.x)&&(act.coor.y==obj.y)&&(act.coor.z==obj.z)) {
-    	*flagdibujo = *flagdibujo == 1 ? 2 : 0;
-    	return true;
+        if (*flagdibujo==1 || *flagdibujo==5)*flagdibujo=2;
+        else if (*flagdibujo==3 || *flagdibujo==4)*flagdibujo=0;
+        return true;
     }
 
     c3d velocidades;
@@ -335,10 +368,11 @@ bool trayectoria(c3d obj, uint8_t *flagdibujo){
     		break;
 
     	case 1:
+    	case 5:
     	case 3:
-    		velocidad_transicion(act.coor, &velocidades, *flagdibujo);
-    	    break;
-
+    	case 4:
+    		velocidad_transicion(act.coor, obj, &velocidades, *flagdibujo);
+    		break;
     	case 2:
     		/* SI SE HICIERA EL CAMBIO DENTRO
     		c2d objetivo_2d;
@@ -384,5 +418,3 @@ bool trayectoria(c3d obj, uint8_t *flagdibujo){
 
 	return false;
 }
-
-
