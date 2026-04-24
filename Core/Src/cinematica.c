@@ -1,10 +1,20 @@
 #include "cinematica.h"
 
-static Color color_act=COLOR1;
-static motores motores_actuales;
+static motores motores_actuales; //esto deberia ser la posicion de los motores leido por los sensores
+//static motores motores_actuales=LECTURA_MOTORES();
+
+static float vx_prev=0.0f;
+static float vy_prev=0.0f;
+static float vz_prev=0.0f;
 
 //static float margen_igualdad = 0.5f;
 
+c4d posicion_actual(void){ return cinematica_directa(motores_actuales); }
+motoresg motoresg_actual(void){ return conv_grados(motores_actuales); }
+motores motores_actual(void){ return (motores_actuales); }
+
+float radianes (float g){return (g* (M_PI / 180.0));}
+float grados (float r){return (r* (180.0 / M_PI));}
 
 
 motores conv_entero( motoresg mot){
@@ -52,32 +62,6 @@ bool dentro_rango( c3d cor){
 	return true;
 }
 
-//////////////////////////////////////////////////////
-//CAMBIO DE COLOR
-
-bool cambio_color_revolver(Color c, TIM_HandleTypeDef *htim){
-	if (c==color_act) return true;
-    c4d act = cinematica_directa(motores_actuales);
-
-	if (!dentro_rango(act.coor)) return false; //SUGNIFICA QUE ESTA PEGADO AL LIENZO Y QUE HAY QUE SEPARARLO
-
-	switch (c){
-	case COLOR1:
-		set_servo_revolver(htim, 0); //rotar a 0
-		break;
-	case COLOR2:
-		set_servo_revolver(htim, 0); //rotar a 90
-		break;
-	case COLOR3:
-		set_servo_revolver(htim, 180); //rotar a 180
-		break;
-	}
-
-	color_act=c;
-	return true;
-}
-
-
 
 //////////////////////////////////////////////////////
 //1. PASO DE COORDENADAS A DIBUJO
@@ -86,15 +70,31 @@ c3d plano_dibujo( c2d cor){
 	c3d vuelta;
 
 	//Nos aseguramos de que este dentro del lienzo
-	if (cor.z<0) cor.z=0;
-	if (cor.y<0) cor.y=0;
-	if (cor.z>200) cor.z=200;
-	if (cor.y>200) cor.y=200;
+	if (cor.z<0) cor.z=SEPz;
+	if (cor.y<0) cor.y=SEPy;
+	if (cor.z>(200)) cor.z=SEPz+200;
+	if (cor.y>(200)) cor.y=SEPy+200;
 
 	//transformación a sistema 3d
 	vuelta.z = cor.z + SEPz;
 	vuelta.y = (int16_t)(cor.y * ANG) + SEPy;
 	vuelta.x = (int16_t)(cor.y * ANG) + SEPx;
+	return vuelta;
+}
+
+c3d plano_no_dibujo( c2d cor){
+	c3d vuelta;
+
+	//Nos aseguramos de que este dentro del lienzo
+	if (cor.z<0) cor.z=SEPz;
+	if (cor.y<0) cor.y=SEPy;
+	if (cor.z>(200)) cor.z=SEPz+200;
+	if (cor.y>(200)) cor.y=SEPy+200;
+
+	//transformación a sistema 3d
+	vuelta.z = cor.z + SEPz;
+	vuelta.y = (int16_t)(cor.y * ANG) + SEPy;
+	vuelta.x = (int16_t)(cor.y * ANG) + SEPx-20;
 	return vuelta;
 }
 
@@ -105,10 +105,11 @@ c3d plano_dibujo( c2d cor){
 c4d cinematica_directa( motores mot){
 
 	c4d vuelta = {0};
-	motores m = mot;
+	motoresg m = conv_grados(mot);
 
 	//1 vuelta son 8mm
-	vuelta.coor.z= (int16_t)roundf((m.base *8/360)); 
+	vuelta.coor.z= (int16_t)roundf((m.base * 8.0f) / 360.0f);
+
 
 	/*
 	PROBLEMA, TIENE CEGUERA DE 44º
@@ -179,20 +180,15 @@ motoresg cinematica_inversa( c3d cor){
 //////////////////////////////////////////////////////
 //4. JACOBIANO
 
-
-
 jcb2 jacobiana(float t1, float t2) { //MUY IMPORTANTE ESTO VA EN RADIANES
-
-
 	///REVISAR SIGBNO
-
 
 	jcb2 J;
 
-    J.j11 =  L1 * sinf(t1) + L2 * sinf(t2);
-    J.j12 =  L2 * sinf(t2);
-    J.j21 = -L1 * cosf(t1) - L2 * cosf(t2);
-    J.j22 = -L2 * cosf(t2);
+    J.j11 =  L1 * sinf(t1) + L2 * sinf(t1+t2);
+    J.j12 =  L2 * sinf(t1+t2);
+    J.j21 = -L1 * cosf(t1) - L2 * cosf(t1+t2);
+    J.j22 = -L2 * cosf(t1+t2);
 
     return J;
 }
@@ -263,9 +259,9 @@ void velocidad_dibujo_recta(c3d act, c3d objetivo, c3d *velocidades)
     float d_xy = sqrtf(dx*dx + dy*dy);
 
     if (d_xy < 0.001f && dz== 0) {
-            velocidades->x = 0.0f;
-            velocidades->y = 0.0f;
-            velocidades->z = 0.0f;
+            velocidades->x = 0;
+            velocidades->y = 0;
+            velocidades->z = 0;
             return;
     }
 
@@ -302,22 +298,49 @@ void velocidad_recta(c3d act, c3d obj, c3d *velocidades)
     float dy = (float)(obj.y - act.y);
     float dz = (float)(obj.z - act.z);
 
-    float K = 0.1f;   // ganancia de aceleracion
+    float K = 0.1f;
 
     float vx = K * dx;
     float vy = K * dy;
     float vz = K * dz;
 
+
+
     // limitar velocidad máxima en XY
     float vxy = sqrtf(vx*vx + vy*vy);
     if (vxy > vmax) {
-    	float esc = vmax / vxy;
-    	vx *= esc;
-    	vy *= esc;
+        float esc = vmax / vxy;
+        vx *= esc;
+        vy *= esc;
     }
 
     // limitar velocidad en Z
     if (fabsf(vz) > vmax) vz = (vz > 0 ? vmax : -vmax);
+
+
+
+    //FILTRO PARA ACELERACIONES
+    //diferencia entre velocidad anterior y la deseada
+    float dvx = vx - vx_prev;
+    float dvy = vy - vy_prev;
+    float dvz = vz - vz_prev;
+
+    float max_step = amax * DT_CONTROL;
+
+    //limitar cambio de velocidad
+    if (dvx >  max_step) dvx =  max_step;
+    if (dvx < -max_step) dvx = -max_step;
+
+    if (dvy >  max_step) dvy =  max_step;
+    if (dvy < -max_step) dvy = -max_step;
+
+    if (dvz >  max_step) dvz =  max_step;
+    if (dvz < -max_step) dvz = -max_step;
+
+    // aplicar suavizado
+    float vx_def = vx_prev + dvx;
+    float vy_def = vy_prev + dvy;
+    float vz_def = vz_prev + dvz;
 
 
     /*
@@ -328,21 +351,25 @@ void velocidad_recta(c3d act, c3d obj, c3d *velocidades)
     velocidades->z = (int16_t)(fabsf(vz) < 1.0f ? (vz > 0 ? 1 : -1) : vz);
     */
 
-    if (fabsf(vx) < 1.0f) vx = 0.0f;
-    if (fabsf(vy) < 1.0f) vy = 0.0f;
-    if (fabsf(vz) < 1.0f) vz = 0.0f;
+    if (fabsf(vx_def) < 1.0f) vx_def = 0.0f;
+    if (fabsf(vy_def) < 1.0f) vy_def = 0.0f;
+    if (fabsf(vz_def) < 1.0f) vz_def = 0.0f;
 
-    velocidades->x = (int16_t)vx;
-    velocidades->y = (int16_t)vy;
-    velocidades->z = (int16_t)vz;
+    velocidades->x = (int16_t)vx_def;
+    velocidades->y = (int16_t)vy_def;
+    velocidades->z = (int16_t)vz_def;
+
+    vx_prev = vx_def;
+    vy_prev = vy_def;
+    vz_prev = vz_def;
 
 }
 
 void velocidad_transicion(c3d act, c3d obj, c3d *velocidades, uint8_t flag)
 {
     int16_t dir; //= (flag == 1 ? 1 : -1);
-    if (flag==1 || flag==5)dir=1;
-    else if (flag==3 || flag==4)dir=-1;
+    if (flag==1)dir=1;
+    else if (flag==3)dir=-1;
     else return;
 
     velocidades->x = dir * (vconst / 2);
@@ -363,15 +390,20 @@ void velocidad_transicion(c3d act, c3d obj, c3d *velocidades, uint8_t flag)
  flag=1_> transicion a dibujo
  flag=2-> dibujo
  flag=3->transicion a no dibuja
- flag=4->cambio de color desde dibujo (se aleja)
- flag=5->dibujo desde cambio de color (se acerca)
  */
 bool trayectoria(c3d obj, uint8_t *flagdibujo){
+	//DEBERIA PILLAR LA LECTURA DE LOS SENSORES
+	//motores_actuales=LECTURA_MOTORES(); O ALGO ASI
     c4d act = cinematica_directa(motores_actuales);
 
     if ((act.coor.x==obj.x)&&(act.coor.y==obj.y)&&(act.coor.z==obj.z)) {
+    	vx_prev = 0;
+    	vy_prev = 0;
+    	vz_prev = 0;
+    	/*
         if (*flagdibujo==1 || *flagdibujo==5)*flagdibujo=2;
         else if (*flagdibujo==3 || *flagdibujo==4)*flagdibujo=0;
+        */
         return true;
     }
 
@@ -382,9 +414,7 @@ bool trayectoria(c3d obj, uint8_t *flagdibujo){
     		break;
 
     	case 1:
-    	case 5:
     	case 3:
-    	case 4:
     		velocidad_transicion(act.coor, obj, &velocidades, *flagdibujo);
     		break;
     	case 2:
@@ -429,6 +459,96 @@ bool trayectoria(c3d obj, uint8_t *flagdibujo){
 
 	motores_actuales = conv_entero(vuelta);
 
-
 	return false;
 }
+
+
+
+//bool trayectoria_cutre(c3d obj, uint8_t *flagdibujo){
+//		//DEBERIA PILLAR LA LECTURA DE LOS SENSORES
+//		//motores_actuales=LECTURA_MOTORES(); O ALGO ASI
+//    c4d act4 = cinematica_directa(motores_actuales);
+//    c3d act = act4.coor;
+//    if (act.x == obj.x && act.y == obj.y && act.z == obj.z) return true;
+//
+//    //bresenham
+//
+//    //distancias
+//    int dx = abs(obj.x - act.x);
+//    int dy = abs(obj.y -act.y);
+//    int dz = abs(obj.z - act.z);
+//
+//    //signos
+//    int sx = (act.x < obj.x) ? 1 : -1;
+//    int sy = (act.y < obj.y) ? 1 : -1;
+//    int sz = (act.z < obj.z) ? 1 : -1;
+//
+//    //si estoy en 1 o 3 estoy en transicion
+//    //si estoy en 0 o 2 avanzo el doble de rapido
+//    int paso = (*flagdibujo == 1 || *flagdibujo == 3) ? 1 : 2;
+//
+//    //dominante en x
+//    if (dx >= dy && dx >= dz) {
+//    	act.x += sx * paso;
+//    	if ((sx > 0 && act.x > obj.x) || (sx < 0 && act.x < obj.x)) act.x = obj.x;
+//    	if (dx != 0) {
+//    		int dy_step = (dy * paso) / dx;
+//    		int dz_step = (dz * paso) / dx;
+//    		if (dy_step == 0 && dy != 0) dy_step = 1 * sy;
+//    		if (dz_step == 0 && dz != 0) dz_step = 1 * sz;
+//    		act.y += dy_step;
+//    		act.z += dz_step;
+//            }
+//        }
+//
+//    //dominante en y
+//    else if (dy >= dx && dy >= dz) {
+//    	act.y += sy * paso;
+//    	if ((sy > 0 && act.y > obj.y) || (sy < 0 && act.y < obj.y)) act.y = obj.y;
+//    	if (dy != 0) {
+//    		int dx_step = (dx * paso) / dy;
+//    		int dz_step = (dz * paso) / dy;
+//    		if (dx_step == 0 && dx != 0) dx_step = 1 * sx;
+//    		if (dz_step == 0 && dz != 0) dz_step = 1 * sz;
+//    		act.x += dx_step;
+//    		act.z += dz_step;
+//    	}
+//    }
+//    //dominante en z
+//    else {
+//    	act.z += sz * paso;
+//    	if ((sz > 0 && act.z > obj.z) || (sz < 0 && act.z < obj.z)) act.z = obj.z;
+//
+//    	if (dz != 0) {
+//    		int dx_step = (dx * paso) / dz;
+//    		int dy_step = (dy * paso) / dz;
+//    		if (dx_step == 0 && dx != 0) dx_step = 1 * sx;
+//    		if (dy_step == 0 && dy != 0) dy_step = 1 * sy;
+//
+//    		act.x += dx_step;
+//    		act.y += dy_step;
+//    	}
+//    }
+//
+//
+//    //saturacion, me lo ha dicho chat
+//    if (sx > 0 && act.x > obj.x) act.x = obj.x;
+//    if (sx < 0 && act.x < obj.x) act.x = obj.x;
+//    if (sy > 0 && act.y > obj.y) act.y = obj.y;
+//    if (sy < 0 && act.y < obj.y) act.y = obj.y;
+//    if (sz > 0 && act.z > obj.z) act.z = obj.z;
+//    if (sz < 0 && act.z < obj.z) act.z = obj.z;
+//
+//
+//    //cinemática inversa
+//    c3d siguiente = { act.x, act.y, act.z };
+//    motoresg motg = cinematica_inversa(siguiente);
+//    motores_actuales = conv_entero(motg);
+//
+//    return false;
+//
+//}
+
+
+
+
