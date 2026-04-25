@@ -1,6 +1,9 @@
+#include <stdlib.h>
 #include "cinematica.h"
 
-static motores motores_actuales; //esto deberia ser la posicion de los motores leido por los sensores
+//static motores motores_actuales; //esto deberia ser la posicion de los motores leido por los sensores
+static motoresg motores_actualesg; //esto deberia ser la posicion de los motores leido por los sensores
+
 //static motores motores_actuales=LECTURA_MOTORES();
 
 static float vx_prev=0.0f;
@@ -9,33 +12,33 @@ static float vz_prev=0.0f;
 
 //static float margen_igualdad = 0.5f;
 
-c4d posicion_actual(void){ return cinematica_directa(motores_actuales); }
-motoresg motoresg_actual(void){ return conv_grados(motores_actuales); }
-motores motores_actual(void){ return (motores_actuales); }
+c4d posicion_actual(void){ return cinematica_directa(get_motoresg()); }
+motoresg motoresg_actual(void){ return get_motoresg(); }
+//motores motores_actual(void){ return (conv_entero(get_motoresg())); }
 
 float radianes (float g){return (g* (M_PI / 180.0));}
 float grados (float r){return (r* (180.0 / M_PI));}
 
 
-motores conv_entero( motoresg mot){
-	motores i;
-	i.base = entero_paso(mot.base);
-	i.r1 = entero_rot(mot.r1);
-	i.r2 = entero_pos(mot.r2);
-	i.r3 = entero_pos(mot.r3);
-
-	return i;
-}
-
-motoresg conv_grados( motores mot){
-	motoresg i;
-	i.base = grados_paso(mot.base);
-	i.r1 = grados_rot(mot.r1);
-	i.r2 = grados_pos(mot.r2);
-	i.r3 = grados_pos(mot.r3);
-
-	return i;
-}
+//motores conv_entero( motoresg mot){
+//	motores i;
+//	i.base = entero_paso(mot.base);
+//	i.r1 = entero_rot(mot.r1);
+//	i.r2 = entero_pos(mot.r2);
+//	i.r3 = entero_pos(mot.r3);
+//
+//	return i;
+//}
+//
+//motoresg conv_grados( motores mot){
+//	motoresg i;
+//	i.base = grados_paso(mot.base);
+//	i.r1 = grados_rot(mot.r1);
+//	i.r2 = grados_pos(mot.r2);
+//	i.r3 = grados_pos(mot.r3);
+//
+//	return i;
+//}
 
 
 motoresg conv_grados_rad( motoresg mot){
@@ -102,10 +105,10 @@ c3d plano_no_dibujo( c2d cor){
 //////////////////////////////////////////////////////
 //2. CINEMATICA DIRECTA
 
-c4d cinematica_directa( motores mot){
+c4d cinematica_directa( motoresg m){
 
 	c4d vuelta = {0};
-	motoresg m = conv_grados(mot);
+	// motoresg m = conv_grados(mot);
 
 	//1 vuelta son 8mm
 	vuelta.coor.z= (int16_t)roundf((m.base * 8.0f) / 360.0f);
@@ -171,7 +174,7 @@ motoresg cinematica_inversa( c3d cor){
 	mot.r1 = restriccion_angulos(roundf(180-grados(t1)));
 	mot.r2 = restriccion_angulos(roundf(-grados(t2)));
 	mot.r3 = restriccion_angulos(roundf(- grados(t3)));
-	
+
 	return mot;
 }
 
@@ -391,15 +394,16 @@ void velocidad_transicion(c3d act, c3d obj, c3d *velocidades, uint8_t flag)
  flag=2-> dibujo
  flag=3->transicion a no dibuja
  */
-bool trayectoria(c3d obj, uint8_t *flagdibujo){
+bool trayectoria(motoresg *salida, c3d obj, uint8_t *flagdibujo){
 	//DEBERIA PILLAR LA LECTURA DE LOS SENSORES
-	//motores_actuales=LECTURA_MOTORES(); O ALGO ASI
-    c4d act = cinematica_directa(motores_actuales);
+	motores_actualesg=get_motoresg(); //ACTUALIZA LA POSICION DE LOS MOTORES
+    c4d act = cinematica_directa(motores_actualesg);
 
     if ((act.coor.x==obj.x)&&(act.coor.y==obj.y)&&(act.coor.z==obj.z)) {
     	vx_prev = 0;
     	vy_prev = 0;
     	vz_prev = 0;
+    	*salida=motores_actualesg;
     	/*
         if (*flagdibujo==1 || *flagdibujo==5)*flagdibujo=2;
         else if (*flagdibujo==3 || *flagdibujo==4)*flagdibujo=0;
@@ -427,13 +431,13 @@ bool trayectoria(c3d obj, uint8_t *flagdibujo){
     		break;
     }
 
-	motoresg mot=conv_grados(motores_actuales);
+	//motoresg mot=conv_grados(motores_actuales);
 
 	//AQUI???
 	//SIGNOS REVISAR!!!!!!!!!!!
-	float t1= radianes(-mot.r1);
-	float t2= radianes(-mot.r2);
-	float t3= radianes(-mot.r3);
+	float t1= radianes(-motores_actualesg.r1);
+	float t2= radianes(-motores_actualesg.r2);
+	float t3= radianes(-motores_actualesg.r3);
 
 	float t1dot, t2dot, t3dot;
 	jacobiana_siguiente(t1, t2, velocidades.x, velocidades.y, &t1dot, &t2dot, &t3dot);
@@ -442,7 +446,7 @@ bool trayectoria(c3d obj, uint8_t *flagdibujo){
 	t2 += t2dot * DT_CONTROL;
 	t3 += t3dot * DT_CONTROL;
 
-	motoresg vuelta= mot;
+	motoresg vuelta= motores_actualesg;
 	vuelta.r1 = grados(t1);
 	vuelta.r2 = grados(t2);
 	vuelta.r3 = grados(t3);
@@ -457,98 +461,99 @@ bool trayectoria(c3d obj, uint8_t *flagdibujo){
 
 	vuelta.base = z_vuelta * 360.0f / 8.0f;
 
-	motores_actuales = conv_entero(vuelta);
-
+	//motores_actuales = conv_entero(vuelta);
+	//motores_actualesg=vuelta;
+	*salida = vuelta;
 	return false;
 }
 
 
 
-//bool trayectoria_cutre(c3d obj, uint8_t *flagdibujo){
-//		//DEBERIA PILLAR LA LECTURA DE LOS SENSORES
-//		//motores_actuales=LECTURA_MOTORES(); O ALGO ASI
-//    c4d act4 = cinematica_directa(motores_actuales);
-//    c3d act = act4.coor;
-//    if (act.x == obj.x && act.y == obj.y && act.z == obj.z) return true;
-//
-//    //bresenham
-//
-//    //distancias
-//    int dx = abs(obj.x - act.x);
-//    int dy = abs(obj.y -act.y);
-//    int dz = abs(obj.z - act.z);
-//
-//    //signos
-//    int sx = (act.x < obj.x) ? 1 : -1;
-//    int sy = (act.y < obj.y) ? 1 : -1;
-//    int sz = (act.z < obj.z) ? 1 : -1;
-//
-//    //si estoy en 1 o 3 estoy en transicion
-//    //si estoy en 0 o 2 avanzo el doble de rapido
-//    int paso = (*flagdibujo == 1 || *flagdibujo == 3) ? 1 : 2;
-//
-//    //dominante en x
-//    if (dx >= dy && dx >= dz) {
-//    	act.x += sx * paso;
-//    	if ((sx > 0 && act.x > obj.x) || (sx < 0 && act.x < obj.x)) act.x = obj.x;
-//    	if (dx != 0) {
-//    		int dy_step = (dy * paso) / dx;
-//    		int dz_step = (dz * paso) / dx;
-//    		if (dy_step == 0 && dy != 0) dy_step = 1 * sy;
-//    		if (dz_step == 0 && dz != 0) dz_step = 1 * sz;
-//    		act.y += dy_step;
-//    		act.z += dz_step;
-//            }
-//        }
-//
-//    //dominante en y
-//    else if (dy >= dx && dy >= dz) {
-//    	act.y += sy * paso;
-//    	if ((sy > 0 && act.y > obj.y) || (sy < 0 && act.y < obj.y)) act.y = obj.y;
-//    	if (dy != 0) {
-//    		int dx_step = (dx * paso) / dy;
-//    		int dz_step = (dz * paso) / dy;
-//    		if (dx_step == 0 && dx != 0) dx_step = 1 * sx;
-//    		if (dz_step == 0 && dz != 0) dz_step = 1 * sz;
-//    		act.x += dx_step;
-//    		act.z += dz_step;
-//    	}
-//    }
-//    //dominante en z
-//    else {
-//    	act.z += sz * paso;
-//    	if ((sz > 0 && act.z > obj.z) || (sz < 0 && act.z < obj.z)) act.z = obj.z;
-//
-//    	if (dz != 0) {
-//    		int dx_step = (dx * paso) / dz;
-//    		int dy_step = (dy * paso) / dz;
-//    		if (dx_step == 0 && dx != 0) dx_step = 1 * sx;
-//    		if (dy_step == 0 && dy != 0) dy_step = 1 * sy;
-//
-//    		act.x += dx_step;
-//    		act.y += dy_step;
-//    	}
-//    }
-//
-//
-//    //saturacion, me lo ha dicho chat
-//    if (sx > 0 && act.x > obj.x) act.x = obj.x;
-//    if (sx < 0 && act.x < obj.x) act.x = obj.x;
-//    if (sy > 0 && act.y > obj.y) act.y = obj.y;
-//    if (sy < 0 && act.y < obj.y) act.y = obj.y;
-//    if (sz > 0 && act.z > obj.z) act.z = obj.z;
-//    if (sz < 0 && act.z < obj.z) act.z = obj.z;
-//
-//
-//    //cinemática inversa
-//    c3d siguiente = { act.x, act.y, act.z };
-//    motoresg motg = cinematica_inversa(siguiente);
-//    motores_actuales = conv_entero(motg);
-//
-//    return false;
-//
-//}
+bool trayectoria_cutre(motoresg *salida, c3d obj, uint8_t *flagdibujo){
+		//DEBERIA PILLAR LA LECTURA DE LOS SENSORES
+		motores_actualesg=get_motoresg(); //ACTUALIZA LA POSICION DE LOS MOTORES
+    c4d act4 = cinematica_directa(motores_actualesg);
+    c3d act = act4.coor;
+    if (act.x == obj.x && act.y == obj.y && act.z == obj.z){
+    	*salida=motores_actualesg;
+    	return true;
+    }
+
+    //bresenham
+
+    //distancias
+    int dx = abs(obj.x - act.x);
+    int dy = abs(obj.y -act.y);
+    int dz = abs(obj.z - act.z);
+
+    //signos
+    int sx = (act.x < obj.x) ? 1 : -1;
+    int sy = (act.y < obj.y) ? 1 : -1;
+    int sz = (act.z < obj.z) ? 1 : -1;
+
+    //si estoy en 1 o 3 estoy en transicion
+    //si estoy en 0 o 2 avanzo el doble de rapido
+    int paso = (*flagdibujo == 1 || *flagdibujo == 3) ? 1 : 2;
+
+    //dominante en x
+    if (dx >= dy && dx >= dz) {
+    	act.x += sx * paso;
+    	if ((sx > 0 && act.x > obj.x) || (sx < 0 && act.x < obj.x)) act.x = obj.x;
+    	if (dx != 0) {
+    		int dy_step = (dy * paso) / dx;
+    		int dz_step = (dz * paso) / dx;
+    		if (dy_step == 0 && dy != 0) dy_step = 1 * sy;
+    		if (dz_step == 0 && dz != 0) dz_step = 1 * sz;
+    		act.y += dy_step;
+    		act.z += dz_step;
+            }
+        }
+
+    //dominante en y
+    else if (dy >= dx && dy >= dz) {
+    	act.y += sy * paso;
+    	if ((sy > 0 && act.y > obj.y) || (sy < 0 && act.y < obj.y)) act.y = obj.y;
+    	if (dy != 0) {
+    		int dx_step = (dx * paso) / dy;
+    		int dz_step = (dz * paso) / dy;
+    		if (dx_step == 0 && dx != 0) dx_step = 1 * sx;
+    		if (dz_step == 0 && dz != 0) dz_step = 1 * sz;
+    		act.x += dx_step;
+    		act.z += dz_step;
+    	}
+    }
+    //dominante en z
+    else {
+    	act.z += sz * paso;
+    	if ((sz > 0 && act.z > obj.z) || (sz < 0 && act.z < obj.z)) act.z = obj.z;
+
+    	if (dz != 0) {
+    		int dx_step = (dx * paso) / dz;
+    		int dy_step = (dy * paso) / dz;
+    		if (dx_step == 0 && dx != 0) dx_step = 1 * sx;
+    		if (dy_step == 0 && dy != 0) dy_step = 1 * sy;
+
+    		act.x += dx_step;
+    		act.y += dy_step;
+    	}
+    }
 
 
+    //saturacion, me lo ha dicho chat
+    if (sx > 0 && act.x > obj.x) act.x = obj.x;
+    if (sx < 0 && act.x < obj.x) act.x = obj.x;
+    if (sy > 0 && act.y > obj.y) act.y = obj.y;
+    if (sy < 0 && act.y < obj.y) act.y = obj.y;
+    if (sz > 0 && act.z > obj.z) act.z = obj.z;
+    if (sz < 0 && act.z < obj.z) act.z = obj.z;
 
+
+    //cinemática inversa
+    c3d siguiente = { act.x, act.y, act.z };
+    motoresg vuelta = cinematica_inversa(siguiente);
+
+	*salida = vuelta;
+	return false;
+
+}
 

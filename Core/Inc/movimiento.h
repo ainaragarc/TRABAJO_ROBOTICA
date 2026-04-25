@@ -16,6 +16,8 @@ typedef struct {
 bool cambio_color_revolver(Color c, TIM_HandleTypeDef *htim);
 void matriz_aleatoria(void);
 
-void dibujar(motores *movimiento , uint8_t flag_parada, uint8_t flag_ON, TIM_HandleTypeDef *htim_revolver);
+void dibujar( uint8_t flag_parada, uint8_t flag_ON, TIM_HandleTypeDef *htim_revolver);
+void prueba_dibujar(c3d objetivo, uint8_t flag_trayctorias);
+
 
 #endif /* INC_MOVIMIENTO_H_ */

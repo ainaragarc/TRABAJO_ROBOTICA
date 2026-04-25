@@ -72,21 +72,6 @@ typedef struct
 	float ang;
 } c4d; //coordenadas 3d mas la orientacion de la punta
 
-typedef struct
-{
-	int16_t base;
-	int16_t r1;
-	int16_t r2;
-	int16_t r3;
-} motores;
-
-typedef struct
-{
-	float base; //LA BASE TMB VA EN GRADOS NO EN DESPLAZAMIENTO, MUCHO CUIDADITO
-	float r1;
-	float r2;
-	float r3;
-} motoresg;
 
 typedef struct {
     float j11; //fila 1 columna 1
@@ -118,7 +103,7 @@ bool dentro_rango( c3d cor);
 
 //2. CINEMATICA DIRECTA
 //DEVUELVE LAS COORDENADAS DDE LA PUNTA
-c4d cinematica_directa( motores mot);
+c4d cinematica_directa( motoresg m);
 
 
 //3. CINEMATICA INVERSA
@@ -132,8 +117,8 @@ void velocidad_dibujo_recta(c3d act, c3d objetivo, c3d *velocidades);
 void velocidad_recta(c3d act, c3d obj, c3d *velocidades);
 void velocidad_transicion(c3d act, c3d obj, c3d *velocidades, uint8_t flag);
 
-bool trayectoria(c3d obj, uint8_t *flagdibujo);
+bool trayectoria(motoresg *salida, c3d obj, uint8_t *flagdibujo);
 
-//bool trayectoria_cutre(c3d obj, uint8_t *flagdibujo);
+bool trayectoria_cutre(motoresg *salida, c3d obj, uint8_t *flagdibujo);
 
 #endif
