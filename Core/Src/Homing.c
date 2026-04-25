@@ -18,7 +18,8 @@ static uint32_t     t_inicio = 0;
 
 extern EncoderRobot   encIzq;
 extern EncoderRobot   encDer;
-extern FinalDeCarrera limiteTraslacion;
+extern FinalDeCarrera limiteIzq;
+extern FinalDeCarrera limiteDer;
 extern FinalDeCarrera limiteInclinacion;
 extern TIM_HandleTypeDef htim5;
 extern TIM_HandleTypeDef htim1;

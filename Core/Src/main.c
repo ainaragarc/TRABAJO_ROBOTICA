@@ -46,6 +46,8 @@
 
 /* Private variables ---------------------------------------------------------*/
 TIM_HandleTypeDef htim1;
+TIM_HandleTypeDef htim2;
+TIM_HandleTypeDef htim3;
 TIM_HandleTypeDef htim5;
 
 /* USER CODE BEGIN PV */
@@ -56,9 +58,9 @@ EncoderRobot encIzq;
 EncoderRobot encDer;
 
 
-FinalDeCarrera limiteTraslacion;
-FinalDeCarrera limiteInclinacion;
-
+FinalDeCarrera limiteIzq;
+FinalDeCarrera limiteDer;
+FinalDeCarrera limiteTraslacionDer;
 bool peligroObstaculo = false;
 struct {
     float distIzq;
@@ -73,6 +75,8 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_TIM1_Init(void);
 static void MX_TIM5_Init(void);
+static void MX_TIM2_Init(void);
+static void MX_TIM3_Init(void);
 /* USER CODE BEGIN PFP */
 void Robot_InitMotores(void);
 void Robot_InitEncoders(void);
@@ -122,12 +126,14 @@ int main(void)
   MX_GPIO_Init();
   MX_TIM1_Init();
   MX_TIM5_Init();
+  MX_TIM2_Init();
+  MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
   EncoderRobot_init(&encIzq, &htim1, 600, 65.0f);
   EncoderRobot_init(&encDer, &htim1, 600, 65.0f);
-  FinalDeCarrera_init(&limiteTraslacion,  GPIOA, GPIO_PIN_10, false);
-  FinalDeCarrera_init(&limiteInclinacion, GPIOA, GPIO_PIN_11, false);
-
+  FinalDeCarrera_init(&limiteIzq,             GPIOA, GPIO_PIN_10, false);
+  FinalDeCarrera_init(&limiteDer,             GPIOA, GPIO_PIN_11, false);
+  FinalDeCarrera_init(&limiteTraslacionDer,   GPIOA, GPIO_PIN_12, false);
   Robot_InitMotores();
   Robot_InitEncoders();
   /* USER CODE END 2 */
@@ -283,6 +289,104 @@ static void MX_TIM1_Init(void)
 }
 
 /**
+  * @brief TIM2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM2_Init(void)
+{
+
+  /* USER CODE BEGIN TIM2_Init 0 */
+
+  /* USER CODE END TIM2_Init 0 */
+
+  TIM_Encoder_InitTypeDef sConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM2_Init 1 */
+
+  /* USER CODE END TIM2_Init 1 */
+  htim2.Instance = TIM2;
+  htim2.Init.Prescaler = 0;
+  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim2.Init.Period = 4294967295;
+  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  sConfig.EncoderMode = TIM_ENCODERMODE_TI12;
+  sConfig.IC1Polarity = TIM_ICPOLARITY_RISING;
+  sConfig.IC1Selection = TIM_ICSELECTION_DIRECTTI;
+  sConfig.IC1Prescaler = TIM_ICPSC_DIV1;
+  sConfig.IC1Filter = 0;
+  sConfig.IC2Polarity = TIM_ICPOLARITY_RISING;
+  sConfig.IC2Selection = TIM_ICSELECTION_DIRECTTI;
+  sConfig.IC2Prescaler = TIM_ICPSC_DIV1;
+  sConfig.IC2Filter = 0;
+  if (HAL_TIM_Encoder_Init(&htim2, &sConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM2_Init 2 */
+
+  /* USER CODE END TIM2_Init 2 */
+
+}
+
+/**
+  * @brief TIM3 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM3_Init(void)
+{
+
+  /* USER CODE BEGIN TIM3_Init 0 */
+
+  /* USER CODE END TIM3_Init 0 */
+
+  TIM_Encoder_InitTypeDef sConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM3_Init 1 */
+
+  /* USER CODE END TIM3_Init 1 */
+  htim3.Instance = TIM3;
+  htim3.Init.Prescaler = 0;
+  htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim3.Init.Period = 65535;
+  htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  sConfig.EncoderMode = TIM_ENCODERMODE_TI12;
+  sConfig.IC1Polarity = TIM_ICPOLARITY_RISING;
+  sConfig.IC1Selection = TIM_ICSELECTION_DIRECTTI;
+  sConfig.IC1Prescaler = TIM_ICPSC_DIV1;
+  sConfig.IC1Filter = 0;
+  sConfig.IC2Polarity = TIM_ICPOLARITY_RISING;
+  sConfig.IC2Selection = TIM_ICSELECTION_DIRECTTI;
+  sConfig.IC2Prescaler = TIM_ICPSC_DIV1;
+  sConfig.IC2Filter = 0;
+  if (HAL_TIM_Encoder_Init(&htim3, &sConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM3_Init 2 */
+
+  /* USER CODE END TIM3_Init 2 */
+
+}
+
+/**
   * @brief TIM5 Initialization Function
   * @param None
   * @retval None
@@ -365,6 +469,7 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOE_CLK_ENABLE();
   __HAL_RCC_GPIOD_CLK_ENABLE();
+  __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOD, STEP_PAP_Pin|DIR_PAP_Pin, GPIO_PIN_RESET);
@@ -379,8 +484,7 @@ static void MX_GPIO_Init(void)
   /* USER CODE BEGIN MX_GPIO_Init_2 */
   // Fines de carrera: PA10 (izquierdo) y PA11 (derecho)
   // Modo EXTI con PULLUP interno. El microswitch conecta a GND (contacto NO).
-  GPIO_InitStruct.Pin  = GPIO_PIN_10 | GPIO_PIN_11;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
+  GPIO_InitStruct.Pin  = GPIO_PIN_10 | GPIO_PIN_11 | GPIO_PIN_12;    GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
@@ -457,12 +561,15 @@ void Robot_TestEncoderManual(void) {
 // ── Seguridad ─────────────────────────────────────────────────────────────────
 
 void Robot_VerificarLimites(void) {
-    if (FinalDeCarrera_getFlag(&limiteTraslacion) || FinalDeCarrera_getFlag(&limiteInclinacion)) {
-        __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_2, 1500u);
-        peligroObstaculo = true;
-        FinalDeCarrera_resetFlag(&limiteTraslacion);
-        FinalDeCarrera_resetFlag(&limiteInclinacion);
-    }
+	if (FinalDeCarrera_getFlag(&limiteIzq) ||
+	    FinalDeCarrera_getFlag(&limiteDer) ||
+	    FinalDeCarrera_getFlag(&limiteTraslacionDer)) {
+	    __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_2, 1500u);
+	    peligroObstaculo = true;
+	    FinalDeCarrera_resetFlag(&limiteIzq);
+	    FinalDeCarrera_resetFlag(&limiteDer);
+	    FinalDeCarrera_resetFlag(&limiteTraslacionDer);
+	}
 }
 
 // ── Debug ─────────────────────────────────────────────────────────────────────
@@ -521,7 +628,10 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
         FinalDeCarrera_onInterrupcion(&limiteTraslacion);
     } else if (GPIO_Pin == GPIO_PIN_11) {
         FinalDeCarrera_onInterrupcion(&limiteInclinacion);
-    }
+    }else if (GPIO_Pin == GPIO_PIN_12) {
+    FinalDeCarrera_onInterrupcion(&limiteTraslacionDer);
+}
+
 }
 
 /* USER CODE END 4 */
