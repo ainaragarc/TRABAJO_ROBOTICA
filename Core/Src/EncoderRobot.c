@@ -12,7 +12,11 @@ void EncoderRobot_inicializar(EncoderRobot* e) {
 }
 
 void EncoderRobot_registrarVueltaZ(EncoderRobot* e) {
-    e->vueltas++;
+    if (e->htim->Instance->CR1 & TIM_CR1_DIR) {
+        e->vueltas--;  // giro hacia atrás
+    } else {
+        e->vueltas++;  // giro hacia adelante
+    }
     __HAL_TIM_SET_COUNTER(e->htim, 0);
 }
 
@@ -24,10 +28,8 @@ void EncoderRobot_reset(EncoderRobot* e) {
 }
 
 int32_t EncoderRobot_getPulsosTotales(EncoderRobot* e) {
-    // Lectura atómica: evita race condition entre el contador hardware y vueltas
-    // que se incrementa en la ISR del canal Z.
     __disable_irq();
-    int16_t conteoHardware = (int16_t)__HAL_TIM_GET_COUNTER(e->htim);
+    int32_t conteoHardware = (int32_t)__HAL_TIM_GET_COUNTER(e->htim);
     int32_t vueltas = e->vueltas;
     __enable_irq();
     return conteoHardware + (vueltas * (int32_t)e->ppr);

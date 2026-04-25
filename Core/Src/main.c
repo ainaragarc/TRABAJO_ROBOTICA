@@ -577,15 +577,23 @@ void Robot_TestEncoderManual(void) {
 // ── Seguridad ─────────────────────────────────────────────────────────────────
 
 void Robot_VerificarLimites(void) {
-	if (FinalDeCarrera_getFlag(&limiteIzq) ||
-	    FinalDeCarrera_getFlag(&limiteDer) ||
-	    FinalDeCarrera_getFlag(&limiteInclinacion)) {
-	    __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_2, 1500u);
-	    peligroObstaculo = true;
-	    FinalDeCarrera_resetFlag(&limiteIzq);
-	    FinalDeCarrera_resetFlag(&limiteDer);
-	    FinalDeCarrera_resetFlag(&limiteInclinacion);
-	}
+    if (FinalDeCarrera_getFlag(&limiteIzq)) {
+        __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_2, 1500u);
+        peligroObstaculo = true;
+        EncoderRobot_reset(&encIzq);  // ← reset encoder traslación a 0
+        FinalDeCarrera_resetFlag(&limiteIzq);
+    }
+    if (FinalDeCarrera_getFlag(&limiteDer)) {
+        __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_2, 1500u);
+        peligroObstaculo = true;
+        FinalDeCarrera_resetFlag(&limiteDer);
+    }
+    if (FinalDeCarrera_getFlag(&limiteInclinacion)) {
+        __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, 1500u);
+        peligroObstaculo = true;
+        EncoderRobot_reset(&encDer);  // ← reset encoder inclinación a 0
+        FinalDeCarrera_resetFlag(&limiteInclinacion);
+    }
 }
 
 // ── Debug ─────────────────────────────────────────────────────────────────────
