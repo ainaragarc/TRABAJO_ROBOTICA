@@ -19,8 +19,8 @@ typedef struct {
 extern EstadoMotorRotacional motor1_estado;
 
 
-void motor1_set_velocidad(TIM_HandleTypeDef *htim, int8_t velocidad);
-void motor1_mover_grados_estimados(TIM_HandleTypeDef *htim, float grados, int8_t velocidad_test);
+void motor1_set_velocidad(TIM_HandleTypeDef *htim, int16_t velocidad);
+void motor1_mover_grados_estimados(TIM_HandleTypeDef *htim, float grados, int16_t velocidad_test);
 
 
 ///////

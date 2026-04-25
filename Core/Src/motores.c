@@ -39,7 +39,7 @@ void motor1_control_tick(EncoderRobot *encoder) {
 }
 
 // Funciones simples
-void motor1_set_velocidad(TIM_HandleTypeDef *htim, int8_t velocidad) {
+void motor1_set_velocidad(TIM_HandleTypeDef *htim, int16_t velocidad) {
     // Mapeo simple:
     // 0 -> 1500us (parado)
     // 100 -> 2000us (aprox max adelante)
@@ -53,13 +53,13 @@ void motor1_set_velocidad(TIM_HandleTypeDef *htim, int8_t velocidad) {
 }
 
 // Movimiento el lazo abierto: (solo para probar un pocao
-void motor1_mover_grados_estimados(TIM_HandleTypeDef *htim, float grados, int8_t velocidad_test) {
+void motor1_mover_grados_estimados(TIM_HandleTypeDef *htim, float grados, int16_t velocidad_test) {
     if (grados == 0 || velocidad_test == 0) return;
 
     // CALIBRACIÓN: Ajusta este valor.
     // Es el tiempo en ms que tarda el motor en mover 1 grado a 'velocidad_test'
     // Ejemplo: Si 360º son 2000ms -> 1º = 5.55ms
-    const float MS_POR_GRADO = 5.55f;
+    const float MS_POR_GRADO = 8.35f;
 
     uint32_t tiempo_movimiento = (uint32_t)(fabsf(grados) * MS_POR_GRADO);
 

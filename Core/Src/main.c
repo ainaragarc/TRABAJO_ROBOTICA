@@ -130,6 +130,21 @@ int main(void)
 
   Robot_InitMotores();
   Robot_InitEncoders();
+
+  motor1_mover_grados_estimados(&htim5, 90.0, 200);
+  HAL_Delay(2000);
+
+  motor1_mover_grados_estimados(&htim5, -90.0, 200);
+  HAL_Delay(2000);
+
+  motor1_set_velocidad(&htim5, -1000);
+  HAL_Delay(2000);
+  motor1_set_velocidad(&htim5, 0);
+  HAL_Delay(1000);
+  motor1_set_velocidad(&htim5, 1000);
+  HAL_Delay(2000);
+  motor1_set_velocidad(&htim5, 0);
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -408,7 +423,7 @@ void Robot_InitMotores(void) {
     // Secuencia de centrado mecánico (bloqueante, solo en arranque)
     float ang_codo_ini = 90.0f, ang_codo_fin = 45.0f;
     float ang_muneca_ini = 0.0f, ang_muneca_fin = 90.0f;
-
+/*
     __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_2, 2000u);
     HAL_Delay(300);
     __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_2, 1500u);
@@ -423,6 +438,7 @@ void Robot_InitMotores(void) {
 
     __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_2, 1500u);
     HAL_Delay(1000);
+    */
 }
 
 void Robot_InitEncoders(void) {
