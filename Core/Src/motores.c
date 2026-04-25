@@ -232,6 +232,7 @@ void control_loop_motores(motoresg objetivo) {
         if (intervalo < 1) intervalo = 1;
         stepper_mover_mm(e_base > 0 ? MM_POR_PASO : -MM_POR_PASO, intervalo);
     }
+    if (fabsf(e_base) < 1.0f) { pap_estado.pasos_restantes = 0;  }
 
     // Inclinación: PID con encoder
 
