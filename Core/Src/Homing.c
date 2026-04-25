@@ -13,6 +13,7 @@
 #define PWM_I_RETROCESO    1600u
 #define HOMING_TIMEOUT_MS  10000u
 #define HOMING_BACKOFF_MM  5.0f
+#define HOMING_BACKOFF_GRADOS  5.0f
 
 static HomingEstado estado   = HOMING_IDLE;
 static uint32_t     t_inicio = 0;
@@ -44,9 +45,11 @@ static void parar_todo(void) {
 void Homing_Iniciar(void) {
     // BYPASS temporal para testing — descomentar las líneas de abajo cuando homing esté listo
     estado = HOMING_COMPLETO;
-    t_inicio = HAL_GetTick();
+
     // estado   = HOMING_TRASLACION;
     // mover_traslacion_pwm(PWM_T_HOME);
+    // mover_inclinacion_pwm(PWM_T_HOME);
+    t_inicio = HAL_GetTick();
 }
 
 bool Homing_EstaCompleto(void) {
@@ -67,21 +70,24 @@ void Homing_Tick(void) {
     switch (estado) {
 
         case HOMING_IDLE:
+        	// Posible estado de espera para empezar el homing.
         case HOMING_COMPLETO:
         case HOMING_ERROR:
             return;
 
         case HOMING_TRASLACION:
+
+
+
             if (HAL_GetTick() - t_inicio > HOMING_TIMEOUT_MS) {
                 parar_todo();
-                estado = HOMING_ERROR;
+                estado = HOMING_ERROR; // Demasiado tiempo ha durado el homing
                 break;
             }
             if (FinalDeCarrera_getFlag(&limiteIzq)) {
                 FinalDeCarrera_resetFlag(&limiteIzq);
                 mover_traslacion_pwm(PWM_PARADO);
-                EncoderRobot_reset(&encIzq);
-                stepper_reset_posicion();  // CAMBIO: reset posición absoluta stepper
+
                 mover_traslacion_pwm(PWM_T_RETROCESO);
                 t_inicio = HAL_GetTick();
                 estado   = HOMING_RETROCESO_T;
@@ -92,8 +98,10 @@ void Homing_Tick(void) {
             if (fabsf(EncoderRobot_getDistanciaMM(&encIzq)) >= HOMING_BACKOFF_MM) {
                 mover_traslacion_pwm(PWM_PARADO);
                 EncoderRobot_reset(&encIzq);
+
                 stepper_reset_posicion();  // CAMBIO: fijar home stepper aquí
                 mover_inclinacion(PWM_I_HOME);
+
                 t_inicio = HAL_GetTick();
                 estado   = HOMING_INCLINACION;
             }
@@ -108,7 +116,7 @@ void Homing_Tick(void) {
             if (FinalDeCarrera_getFlag(&limiteInclinacion)) {
                 FinalDeCarrera_resetFlag(&limiteInclinacion);
                 motor1_parar();            // CAMBIO: motor1_parar() en vez de htim1
-                EncoderRobot_reset(&encDer);
+
                 mover_inclinacion(PWM_I_RETROCESO);
                 t_inicio = HAL_GetTick();
                 estado   = HOMING_RETROCESO_I;
@@ -116,7 +124,7 @@ void Homing_Tick(void) {
             break;
 
         case HOMING_RETROCESO_I:
-            if (fabsf(EncoderRobot_getDistanciaMM(&encDer)) >= HOMING_BACKOFF_MM) {
+            if (fabsf(EncoderRobot_getAnguloGrados(&encDer)) >= HOMING_BACKOFF_MM) {
                 motor1_parar();            // CAMBIO: motor1_parar() en vez de htim1
                 EncoderRobot_reset(&encDer);
                 estado = HOMING_COMPLETO;
