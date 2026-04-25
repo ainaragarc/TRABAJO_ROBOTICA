@@ -11,15 +11,14 @@ void EncoderRobot_inicializar(EncoderRobot* e) {
     HAL_TIM_Encoder_Start(e->htim, TIM_CHANNEL_ALL);
 }
 
+// CAMBIO: el canal Z solo resetea el contador hardware para evitar deriva.
+// NO modifica vueltas — la posición absoluta la fija exclusivamente el fin de carrera.
+// Esto evita que Z y el fin de carrera se pisen mutuamente.
 void EncoderRobot_registrarVueltaZ(EncoderRobot* e) {
-    if (e->htim->Instance->CR1 & TIM_CR1_DIR) {
-        e->vueltas--;  // giro hacia atrás
-    } else {
-        e->vueltas++;  // giro hacia adelante
-    }
     __HAL_TIM_SET_COUNTER(e->htim, 0);
 }
 
+// Este sí resetea todo — solo lo llama el fin de carrera para fijar el origen.
 void EncoderRobot_reset(EncoderRobot* e) {
     __disable_irq();
     __HAL_TIM_SET_COUNTER(e->htim, 0);
@@ -36,7 +35,7 @@ int32_t EncoderRobot_getPulsosTotales(EncoderRobot* e) {
 }
 
 float EncoderRobot_getAnguloGrados(EncoderRobot* e) {
-    return (float)(EncoderRobot_getPulsosTotales(e) % e->ppr) * (360.0f / e->ppr);
+    return (float)(EncoderRobot_getPulsosTotales(e) % (int32_t)e->ppr) * (360.0f / e->ppr);
 }
 
 float EncoderRobot_getDistanciaMM(EncoderRobot* e) {

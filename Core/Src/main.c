@@ -77,9 +77,9 @@ int main(void)
   MX_TIM3_Init();
 
   /* USER CODE BEGIN 2 */
-  // CAMBIO: htim1->htim2/htim3, PPR 600->2400 (cuadratura x4)
-  EncoderRobot_init(&encIzq, &htim2, 2400, 65.0f);
-  EncoderRobot_init(&encDer, &htim3, 2400, 65.0f);
+  // CAMBIO: htim1->htim2/htim3, PPR(cuadratura x4)
+  EncoderRobot_init(&encIzq, &htim2, 4000, 65.0f);
+  EncoderRobot_init(&encDer, &htim3, 4000, 65.0f);
 
   FinalDeCarrera_init(&limiteIzq,         GPIOA, GPIO_PIN_10, false);
   FinalDeCarrera_init(&limiteInclinacion, GPIOA, GPIO_PIN_11, false);
