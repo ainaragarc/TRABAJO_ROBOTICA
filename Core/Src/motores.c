@@ -23,6 +23,9 @@ static PID pid_r1 = {
     .vmax = 30.0f, .zonamuerta = 0.5f
 };
 
+static bool freno_R1_activo = false;
+static float freno_R1_objetivo = 0.0f;
+
 // ── Motor 1: servo rotacional inclinación (TIM5_CH2) ─────────────────────────
 
 EstadoMotorRotacional motor1_estado = {0};
@@ -216,7 +219,6 @@ float pid_funcion(PID *pid, float error) {
     return u;
 }
 
-// CAMBIO: control_loop_motores usa getDistanciaMM para base (mm, no ángulo)
 void control_loop_motores(motoresg objetivo) {
     if (peligroObstaculo) { motor1_parar(); return; }
 
@@ -232,12 +234,61 @@ void control_loop_motores(motoresg objetivo) {
     }
 
     // Inclinación: PID con encoder
-    motor1_pid_tick(&encDer, objetivo.r1);
+
+    //si el freno esta activo y el objetivo no corresponde con el encoder lo apaga
+    if (freno_R1_activo && fabsf(objetivo.r1 - freno_R1_objetivo) > 1.0f) freno_R1_activo=false;
+    if (!freno_R1_activo && r1_llega(objetivo.r1)) {
+    	freno_R1_objetivo = objetivo.r1;
+    	freno_R1_activo = true;
+    }
+    if (freno_R1_activo) { freno_R1(freno_R1_objetivo);}
+    else motor1_pid_tick(&encDer, objetivo.r1);
 
     // Servos posicionales: directo a posición en htim5
     set_servo_2_grados(&htim5, objetivo.r2);
     set_servo_3_grados(&htim5, objetivo.r3);
 }
+
+bool r1_llega(float objetivo_r1)
+{
+    float actual = EncoderRobot_getAnguloGrados(&encDer);
+    float tol = 2.0f; // tolerancia en grados
+
+    return fabsf(actual - objetivo_r1) < tol;
+}
+
+void freno_R1(float objetivo)
+{
+	freno_R1_activo=true;
+	freno_R1_objetivo=objetivo;
+    float actual = EncoderRobot_getAnguloGrados(&encDer);
+    float error = objetivo - actual;
+
+    const float zona_muerta = 2.0f;   // no corregir si esta cerca
+    const float zona_freno  = 5.0f;  // solo corregir si se va MUCHO
+
+    // Dentro de la zona muertA, no vibrar
+    if (fabsf(error) < zona_muerta) {
+        motor1_set_velocidad(&htim5, 0);
+        pid_r1.integral = 0;
+        return;
+    }
+
+    // Si se va un poco, NO corregir
+    if (fabsf(error) < zona_freno) {
+        motor1_set_velocidad(&htim5, 0);
+        return;
+    }
+
+    // Si se va mucho, corregir suave
+    float u = pid_funcion(&pid_r1, error);
+
+    if (u > 25) u = 25;
+    if (u < -25) u = -25;
+
+    motor1_set_velocidad(&htim5, (int8_t)u);
+}
+
 
 // ── Conversión ────────────────────────────────────────────────────────────────
 

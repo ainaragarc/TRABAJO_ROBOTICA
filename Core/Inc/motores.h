@@ -97,6 +97,9 @@ motoresg get_motoresg(void);
 bool     set_motores(motoresg m);
 void     control_loop_motores(motoresg objetivo);
 
+void freno_R1(float objetivo);
+bool r1_llega(float objetivo_r1);
+
 // ── Conversión ────────────────────────────────────────────────────────────────
 float    convertir_grados(uint16_t x, uint16_t in_min, uint16_t in_max, float out_min, float out_max);
 uint16_t convertir_int(float x, float in_min, float in_max, uint16_t out_min, uint16_t out_max);

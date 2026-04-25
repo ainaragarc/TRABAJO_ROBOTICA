@@ -22,9 +22,9 @@
 
 //MEDIDA DE LOS ESLABONES
 #define LBASE 430 //longitud base (corredera) en mm
-#define L1 20 //longitud elabon 1
-#define L2 20 //longitud elabon 2
-#define L3 20 //longitud elabon 3 (revolver + boli)
+#define L1 139 //longitud elabon 1
+#define L2 123 //longitud elabon 2
+#define L3 140 //longitud elabon 3 (revolver + boli)
 
 //OTRAS MEDIDAS IMPORTANTES
 #define SEPz 20 //separacion entre el inicio de la corredera y el inicio del lienzo
