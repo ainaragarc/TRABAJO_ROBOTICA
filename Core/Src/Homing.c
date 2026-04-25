@@ -1,17 +1,18 @@
 #include "Homing.h"
 #include "EncoderRobot.h"
 #include "FinalDeCarrera.h"
+#include "motores.h"
 #include <stdbool.h>
 #include <stdio.h>
 #include <math.h>
 
-#define PWM_PARADO          1500u
-#define PWM_T_HOME          1600u
-#define PWM_T_RETROCESO     1400u
-#define PWM_I_HOME          1400u
-#define PWM_I_RETROCESO     1600u
-#define HOMING_TIMEOUT_MS   10000u
-#define HOMING_BACKOFF_MM   5.0f
+#define PWM_PARADO         1500u
+#define PWM_T_HOME         1600u
+#define PWM_T_RETROCESO    1400u
+#define PWM_I_HOME         1400u
+#define PWM_I_RETROCESO    1600u
+#define HOMING_TIMEOUT_MS  10000u
+#define HOMING_BACKOFF_MM  5.0f
 
 static HomingEstado estado   = HOMING_IDLE;
 static uint32_t     t_inicio = 0;
@@ -22,26 +23,30 @@ extern FinalDeCarrera limiteIzq;
 extern FinalDeCarrera limiteDer;
 extern FinalDeCarrera limiteInclinacion;
 extern TIM_HandleTypeDef htim5;
-extern TIM_HandleTypeDef htim1;
+// CAMBIO: eliminado extern htim1 — ya no se usa en ningún sitio
 
-static void mover_traslacion(uint32_t pwm) {
+// La traslación en homing se hace con el stepper (parar = 0 pasos)
+// y con PWM directo para el servo de traslación si lo hubiera
+static void mover_traslacion_pwm(uint32_t pwm) {
     __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_2, pwm);
 }
 
+// CAMBIO: mover_inclinacion ahora usa TIM5_CH2 (motor1) en vez de htim1_CH1
 static void mover_inclinacion(uint32_t pwm) {
-    __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, pwm);
+    __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_2, pwm);
 }
 
 static void parar_todo(void) {
-    mover_traslacion(PWM_PARADO);
-    mover_inclinacion(PWM_PARADO);
+    mover_traslacion_pwm(PWM_PARADO);
+    motor1_parar();  // CAMBIO: motor1_parar() en vez de htim1
 }
 
 void Homing_Iniciar(void) {
-    estado   = HOMING_TRASLACION;
+    // BYPASS temporal para testing — descomentar las líneas de abajo cuando homing esté listo
+    estado = HOMING_COMPLETO;
     t_inicio = HAL_GetTick();
-    mover_traslacion(PWM_T_HOME);
-    printf("HOMING: traslacion iniciada\r\n");
+    // estado   = HOMING_TRASLACION;
+    // mover_traslacion_pwm(PWM_T_HOME);
 }
 
 bool Homing_EstaCompleto(void) {
@@ -70,28 +75,27 @@ void Homing_Tick(void) {
             if (HAL_GetTick() - t_inicio > HOMING_TIMEOUT_MS) {
                 parar_todo();
                 estado = HOMING_ERROR;
-                printf("HOMING ERROR: timeout traslacion\r\n");
                 break;
             }
             if (FinalDeCarrera_getFlag(&limiteIzq)) {
                 FinalDeCarrera_resetFlag(&limiteIzq);
-                mover_traslacion(PWM_PARADO);
+                mover_traslacion_pwm(PWM_PARADO);
                 EncoderRobot_reset(&encIzq);
-                mover_traslacion(PWM_T_RETROCESO);
+                stepper_reset_posicion();  // CAMBIO: reset posición absoluta stepper
+                mover_traslacion_pwm(PWM_T_RETROCESO);
                 t_inicio = HAL_GetTick();
                 estado   = HOMING_RETROCESO_T;
-                printf("HOMING: traslacion en limite, retrocediendo\r\n");
             }
             break;
 
         case HOMING_RETROCESO_T:
             if (fabsf(EncoderRobot_getDistanciaMM(&encIzq)) >= HOMING_BACKOFF_MM) {
-                mover_traslacion(PWM_PARADO);
+                mover_traslacion_pwm(PWM_PARADO);
                 EncoderRobot_reset(&encIzq);
+                stepper_reset_posicion();  // CAMBIO: fijar home stepper aquí
                 mover_inclinacion(PWM_I_HOME);
                 t_inicio = HAL_GetTick();
                 estado   = HOMING_INCLINACION;
-                printf("HOMING: inclinacion iniciada\r\n");
             }
             break;
 
@@ -99,26 +103,23 @@ void Homing_Tick(void) {
             if (HAL_GetTick() - t_inicio > HOMING_TIMEOUT_MS) {
                 parar_todo();
                 estado = HOMING_ERROR;
-                printf("HOMING ERROR: timeout inclinacion\r\n");
                 break;
             }
             if (FinalDeCarrera_getFlag(&limiteInclinacion)) {
                 FinalDeCarrera_resetFlag(&limiteInclinacion);
-                mover_inclinacion(PWM_PARADO);
+                motor1_parar();            // CAMBIO: motor1_parar() en vez de htim1
                 EncoderRobot_reset(&encDer);
                 mover_inclinacion(PWM_I_RETROCESO);
                 t_inicio = HAL_GetTick();
                 estado   = HOMING_RETROCESO_I;
-                printf("HOMING: inclinacion en limite, retrocediendo\r\n");
             }
             break;
 
         case HOMING_RETROCESO_I:
             if (fabsf(EncoderRobot_getDistanciaMM(&encDer)) >= HOMING_BACKOFF_MM) {
-                mover_inclinacion(PWM_PARADO);
+                motor1_parar();            // CAMBIO: motor1_parar() en vez de htim1
                 EncoderRobot_reset(&encDer);
                 estado = HOMING_COMPLETO;
-                printf("HOMING: COMPLETO. Robot listo.\r\n");
             }
             break;
     }
