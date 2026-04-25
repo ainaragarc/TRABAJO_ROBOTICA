@@ -24,11 +24,11 @@ extern TIM_HandleTypeDef htim5;
 extern TIM_HandleTypeDef htim1;
 
 static void mover_traslacion(uint32_t pwm) {
-    __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_2, pwm);
+   // __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_2, pwm);
 }
 
 static void mover_inclinacion(uint32_t pwm) {
-    __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, pwm);
+   // __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, pwm);
 }
 
 static void parar_todo(void) {
