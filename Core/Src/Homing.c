@@ -73,8 +73,8 @@ void Homing_Tick(void) {
                 printf("HOMING ERROR: timeout traslacion\r\n");
                 break;
             }
-            if (FinalDeCarrera_getFlag(&limiteTraslacion)) {
-                FinalDeCarrera_resetFlag(&limiteTraslacion);
+            if (FinalDeCarrera_getFlag(&limiteIzq)) {
+                FinalDeCarrera_resetFlag(&limiteIzq);
                 mover_traslacion(PWM_PARADO);
                 EncoderRobot_reset(&encIzq);
                 mover_traslacion(PWM_T_RETROCESO);

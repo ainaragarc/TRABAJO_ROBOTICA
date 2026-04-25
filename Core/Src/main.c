@@ -60,7 +60,7 @@ EncoderRobot encDer;
 
 FinalDeCarrera limiteIzq;
 FinalDeCarrera limiteDer;
-FinalDeCarrera limiteTraslacionDer;
+FinalDeCarrera limiteInclinacion;
 bool peligroObstaculo = false;
 struct {
     float distIzq;
@@ -131,9 +131,9 @@ int main(void)
   /* USER CODE BEGIN 2 */
   EncoderRobot_init(&encIzq, &htim1, 600, 65.0f);
   EncoderRobot_init(&encDer, &htim1, 600, 65.0f);
-  FinalDeCarrera_init(&limiteIzq,             GPIOA, GPIO_PIN_10, false);
-  FinalDeCarrera_init(&limiteDer,             GPIOA, GPIO_PIN_11, false);
-  FinalDeCarrera_init(&limiteTraslacionDer,   GPIOA, GPIO_PIN_12, false);
+  FinalDeCarrera_init(&limiteIzq,          GPIOA, GPIO_PIN_10, false);
+  FinalDeCarrera_init(&limiteDer,          GPIOA, GPIO_PIN_12, false);
+  FinalDeCarrera_init(&limiteInclinacion,  GPIOA, GPIO_PIN_11, false);
   Robot_InitMotores();
   Robot_InitEncoders();
 
@@ -579,12 +579,12 @@ void Robot_TestEncoderManual(void) {
 void Robot_VerificarLimites(void) {
 	if (FinalDeCarrera_getFlag(&limiteIzq) ||
 	    FinalDeCarrera_getFlag(&limiteDer) ||
-	    FinalDeCarrera_getFlag(&limiteTraslacionDer)) {
+	    FinalDeCarrera_getFlag(&limiteInclinacion)) {
 	    __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_2, 1500u);
 	    peligroObstaculo = true;
 	    FinalDeCarrera_resetFlag(&limiteIzq);
 	    FinalDeCarrera_resetFlag(&limiteDer);
-	    FinalDeCarrera_resetFlag(&limiteTraslacionDer);
+	    FinalDeCarrera_resetFlag(&limiteInclinacion);
 	}
 }
 
@@ -641,12 +641,12 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
     } else if (GPIO_Pin == GPIO_PIN_5) {
         EncoderRobot_registrarVueltaZ(&encDer);
     } else if (GPIO_Pin == GPIO_PIN_10) {
-        FinalDeCarrera_onInterrupcion(&limiteTraslacion);
+        FinalDeCarrera_onInterrupcion(&limiteIzq);
     } else if (GPIO_Pin == GPIO_PIN_11) {
         FinalDeCarrera_onInterrupcion(&limiteInclinacion);
-    }else if (GPIO_Pin == GPIO_PIN_12) {
-    FinalDeCarrera_onInterrupcion(&limiteTraslacionDer);
-}
+    } else if (GPIO_Pin == GPIO_PIN_12) {
+        FinalDeCarrera_onInterrupcion(&limiteDer);
+    }
 
 }
 
