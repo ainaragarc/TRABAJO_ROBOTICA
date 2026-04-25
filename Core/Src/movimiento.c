@@ -43,13 +43,13 @@ bool cambio_color_revolver(Color c, TIM_HandleTypeDef *htim){
 
 	switch (c){
 	case COLOR1:
-		set_servo_revolver(htim, 0); //rotar a 0
+		set_servo_revolver(htim, entero_revol(0)); //rotar a 0
 		break;
 	case COLOR2:
-		set_servo_revolver(htim, 90); //rotar a 90
+		set_servo_revolver(htim, entero_revol(90)); //rotar a 90
 		break;
 	case COLOR3:
-		set_servo_revolver(htim, 180); //rotar a 180
+		set_servo_revolver(htim, entero_revol(180)); //rotar a 180
 		break;
 	}
 
@@ -71,10 +71,11 @@ bool cambio_color_revolver(Color c, TIM_HandleTypeDef *htim){
 
 
 //AQUI FALTA UUNA LLAMNADICA A LOS MOTORES
-void dibujar(motores *movimiento , uint8_t flag_parada, uint8_t flag_ON, TIM_HandleTypeDef *htim_revolver){
+void dibujar( uint8_t flag_parada, uint8_t flag_ON, TIM_HandleTypeDef *htim_revolver){
 
 	c3d objetivo;
 	bool i=false;
+    motoresg movimiento_motores;
 
 	if (flag_parada>0){ flag_pasos=0; }
 
@@ -95,9 +96,8 @@ void dibujar(motores *movimiento , uint8_t flag_parada, uint8_t flag_ON, TIM_Han
 	case 5: //RUMBO AL PRIMER PUNTO
 		flag_trayctorias=0;
 		objetivo = plano_no_dibujo(dibujo.p[color_act][npuntos]); //punto objetivo
-		i = trayectoria(objetivo, &flag_trayctorias);
-		*movimiento=motores_actual(); //donde tiene que ir los motores una vez calculada la trayectoria
-		//mueve_robot(movimiento, htim_r1, htim_r2, htim_r3, htim_base);//FUNCION QUE CAMBIA LOS MOTORES
+		i = trayectoria( &movimiento_motores ,objetivo, &flag_trayctorias);
+		control_loop_motores(movimiento_motores);
 
 		if (i==true){
 			flag_pasos=4;
@@ -109,9 +109,8 @@ void dibujar(motores *movimiento , uint8_t flag_parada, uint8_t flag_ON, TIM_Han
 	case 4://TRANSICION A DIBUJAR
 		flag_trayctorias=1;
 		objetivo = plano_dibujo(dibujo.p[color_act][npuntos]); //punto objetivo
-		i= trayectoria(objetivo, &flag_trayctorias);
-		*movimiento=motores_actual(); //donde tiene que ir los motores una vez calculada la trayectoria
-		//mueve_robot(movimiento, htim_r1, htim_r2, htim_r3, htim_base);//FUNCION QUE CAMBIA LOS MOTORES
+		i = trayectoria( &movimiento_motores ,objetivo, &flag_trayctorias);
+		control_loop_motores(movimiento_motores);
 
 		if (i==true){
 			flag_pasos=3;
@@ -124,9 +123,8 @@ void dibujar(motores *movimiento , uint8_t flag_parada, uint8_t flag_ON, TIM_Han
 		flag_trayctorias=2;
 
 		objetivo = plano_dibujo(dibujo.p[color_act][npuntos]); //punto objetivo
-		i= trayectoria(objetivo, &flag_trayctorias);
-		*movimiento=motores_actual(); //donde tiene que ir los motores una vez calculada la trayectoria
-		//mueve_robot(movimiento, htim_r1, htim_r2, htim_r3, htim_base);//FUNCION QUE CAMBIA LOS MOTORES
+		i = trayectoria( &movimiento_motores ,objetivo, &flag_trayctorias);
+		control_loop_motores(movimiento_motores);
 
 		if (i==true){
 			if(npuntos==(NUMERO_PUNTOS-1)){ flag_pasos=2;} //si acaba eñ ultimo punto modifica estado
@@ -140,9 +138,8 @@ void dibujar(motores *movimiento , uint8_t flag_parada, uint8_t flag_ON, TIM_Han
 
 		flag_trayctorias=3;
 		objetivo = plano_no_dibujo(dibujo.p[color_act][npuntos]); //punto objetivo
-		i= trayectoria(objetivo, &flag_trayctorias);
-		*movimiento=motores_actual(); //donde tiene que ir los motores una vez calculada la trayectoria
-		//mueve_robot(movimiento, htim_r1, htim_r2, htim_r3, htim_base);//FUNCION QUE CAMBIA LOS MOTORES
+		i = trayectoria( &movimiento_motores ,objetivo, &flag_trayctorias);
+		control_loop_motores(movimiento_motores);
 
 		if (i==true){
 			npuntos=0; // SE RESETEA AL PUNTO 0
@@ -168,9 +165,8 @@ void dibujar(motores *movimiento , uint8_t flag_parada, uint8_t flag_ON, TIM_Han
 	case 0://IR A REPOSO
 		flag_trayctorias=0;
 		//objetivo = posicion_reposo(); //POSICION RESPOSO
-		i = trayectoria(objetivo, &flag_trayctorias);
-		*movimiento=motores_actual(); //donde tiene que ir los motores una vez calculada la trayectoria
-		//mueve_robot(movimiento, htim_r1, htim_r2, htim_r3, htim_base);//FUNCION QUE CAMBIA LOS MOTORES
+		i = trayectoria( &movimiento_motores ,objetivo, &flag_trayctorias);
+		control_loop_motores(movimiento_motores);
 
 		if (flag_parada==0 && i==true){
 			flag_pasos=7;
@@ -179,5 +175,14 @@ void dibujar(motores *movimiento , uint8_t flag_parada, uint8_t flag_ON, TIM_Han
 
 		break;
 	}
+
+}
+
+
+void prueba_dibujar(c3d objetivo, uint8_t flag_trayctorias){
+	bool i=false;
+    motoresg movimiento_motores;
+	i = trayectoria( &movimiento_motores ,objetivo, &flag_trayctorias);
+	control_loop_motores(movimiento_motores);
 
 }

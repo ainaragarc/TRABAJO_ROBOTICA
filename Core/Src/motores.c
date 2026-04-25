@@ -1,129 +1,149 @@
 #include "motores.h"
-
 #include <math.h>
 
-
-//static uint16_t ANGULO_1 = 0u;
-static uint16_t ANGULO_2 = 0u; // Ángulo del motor del codo (servo posicional)
-static uint16_t ANGULO_3 = 0u;  // Ángulo del motor de la muñeca (servo posicional)
-static uint16_t ANGULO_REVOLVER = 0u; // Ángulo del motor del revolver (servo posicional)
+static uint16_t ANGULO_2        = 0u;
+static uint16_t ANGULO_3        = 0u;
+static uint16_t ANGULO_REVOLVER = 0u;
 
 extern TIM_HandleTypeDef htim5;
-extern TIM_HandleTypeDef htim1;
+// CAMBIO: eliminado extern htim1 — ya no se usa
 extern bool peligroObstaculo;
+extern EncoderRobot encIzq;
+extern EncoderRobot encDer;
 
-///////
-// MOTOR 1: SERVO ROTACIONAL
+static PID pid_base = {
+    .Kp = 2.0f, .Ki = 0.5f, .Kd = 0.1f,
+    .integral = 0, .prev_error = 0,
+    .vmax = 50.0f, .zonamuerta = 0.5f
+};
+
+static PID pid_r1 = {
+    .Kp = 1.5f, .Ki = 0.3f, .Kd = 0.05f,
+    .integral = 0, .prev_error = 0,
+    .vmax = 30.0f, .zonamuerta = 0.5f
+};
+
+static bool freno_R1_activo = false;
+static float freno_R1_objetivo = 0.0f;
+
+// ── Motor 1: servo rotacional inclinación (TIM5_CH2) ─────────────────────────
 
 EstadoMotorRotacional motor1_estado = {0};
 
-// Funciones sofisticadas con estructura estado motor
-void motor1_iniciar_giro(EncoderRobot *encoder, float grados, int8_t velocidad) {
-    motor1_estado.angulo_inicial = EncoderRobot_getAnguloGrados(encoder);
-    motor1_estado.angulo_objetivo = grados;
-    motor1_estado.velocidad = (grados > 0) ? velocidad : -velocidad;
-    motor1_estado.en_movimiento = true;
+void motor1_set_velocidad(TIM_HandleTypeDef *htim, int16_t velocidad) {
+    int32_t us = 1500 + (velocidad * 5);
+    if (us < 1000) us = 1000;
+    if (us > 2000) us = 2000;
+    __HAL_TIM_SET_COMPARE(htim, TIM_CHANNEL_2, (uint32_t)us);
+}
 
+// CAMBIO: añadida motor1_parar que faltaba en este .c
+void motor1_parar(void) {
+    motor1_set_velocidad(&htim5, 0);
+    motor1_estado.en_movimiento = false;
+}
+
+void motor1_iniciar_giro(EncoderRobot *encoder, float grados, int16_t velocidad) {
+    motor1_estado.angulo_inicial  = EncoderRobot_getAnguloGrados(encoder);
+    motor1_estado.angulo_objetivo = grados;
+    motor1_estado.velocidad       = (grados > 0) ? velocidad : -velocidad;
+    motor1_estado.en_movimiento   = true;
     motor1_set_velocidad(&htim5, motor1_estado.velocidad);
 }
 
 void motor1_control_tick(EncoderRobot *encoder) {
     if (!motor1_estado.en_movimiento) return;
-
     float desplazamiento = EncoderRobot_getAnguloGrados(encoder) - motor1_estado.angulo_inicial;
-
     if (fabsf(desplazamiento) >= fabsf(motor1_estado.angulo_objetivo) || peligroObstaculo) {
-        motor1_set_velocidad(&htim5, 0);
-        motor1_estado.en_movimiento = false;
+        motor1_parar();
     }
 }
 
-// Funciones simples
-void motor1_set_velocidad(TIM_HandleTypeDef *htim, int16_t velocidad) {
-    // Mapeo simple:
-    // 0 -> 1500us (parado)
-    // 100 -> 2000us (aprox max adelante)
-    // -100 -> 1000us (aprox max atrás)
-    uint16_t us = 1500u + (velocidad * 5);
-
-    if (us < 1000) us = 1000;
-    if (us > 2000) us = 2000;
-
-    __HAL_TIM_SET_COMPARE(htim, TIM_CHANNEL_2, us);
+void motor1_pid_tick(EncoderRobot *encoder, float objetivo_grados) {
+    if (peligroObstaculo) { motor1_parar(); return; }
+    float actual = EncoderRobot_getAnguloGrados(encoder);
+    float error  = objetivo_grados - actual;
+    float u      = pid_funcion(&pid_r1, error);
+    motor1_set_velocidad(&htim5, (int16_t)u);
 }
 
-// Movimiento el lazo abierto: (solo para probar un pocao
 void motor1_mover_grados_estimados(TIM_HandleTypeDef *htim, float grados, int16_t velocidad_test) {
     if (grados == 0 || velocidad_test == 0) return;
-
-    // CALIBRACIÓN: Ajusta este valor.
-    // Es el tiempo en ms que tarda el motor en mover 1 grado a 'velocidad_test'
-    // Ejemplo: Si 360º son 2000ms -> 1º = 5.55ms
     const float MS_POR_GRADO = 8.35f;
-
-    uint32_t tiempo_movimiento = (uint32_t)(fabsf(grados) * MS_POR_GRADO);
-
-    // Determinar dirección
-    if (grados > 0) {
-        motor1_set_velocidad(htim, velocidad_test);
-    } else {
-        motor1_set_velocidad(htim, -velocidad_test);
-    }
-
-    HAL_Delay(tiempo_movimiento);
-
-    // Frenar
+    uint32_t tiempo = (uint32_t)(fabsf(grados) * MS_POR_GRADO);
+    motor1_set_velocidad(htim, (grados > 0) ? velocidad_test : -velocidad_test);
+    HAL_Delay(tiempo);
     motor1_set_velocidad(htim, 0);
 }
 
+// ── Servos posicionales (TIM5_CH3 codo, TIM5_CH4 muñeca) ─────────────────────
 
-///////
-// MOTORES POSICIONALES:
-
-void set_servo_2(TIM_HandleTypeDef *htim, uint16_t us)
-{
-	// Establece la posicion motor 2
-	ANGULO_2=us;
-	__HAL_TIM_SET_COMPARE(htim, TIM_CHANNEL_3, us);
+void set_servo_2(TIM_HandleTypeDef *htim, uint16_t us) {
+    ANGULO_2 = us;
+    __HAL_TIM_SET_COMPARE(htim, TIM_CHANNEL_3, us);
 }
 
-void set_servo_3(TIM_HandleTypeDef *htim, uint16_t us)
-{
-	// Establece la posicion motor 2
-	ANGULO_3=us;
-	__HAL_TIM_SET_COMPARE(htim, TIM_CHANNEL_4, us);
-}
-void set_servo_revolver(TIM_HandleTypeDef *htim, uint16_t us)
-{
-	// Establece la posicion motor del revolver
-	ANGULO_REVOLVER=us;
-	__HAL_TIM_SET_COMPARE(htim, TIM_CHANNEL_3, us);
+void set_servo_3(TIM_HandleTypeDef *htim, uint16_t us) {
+    ANGULO_3 = us;
+    __HAL_TIM_SET_COMPARE(htim, TIM_CHANNEL_4, us);
 }
 
-uint16_t get_servo_2(void) { return ANGULO_2; }
-uint16_t get_servo_3(void) { return ANGULO_3; }
+void set_servo_revolver(TIM_HandleTypeDef *htim, uint16_t us) {
+    ANGULO_REVOLVER = us;
+    __HAL_TIM_SET_COMPARE(htim, TIM_CHANNEL_3, us);
+}
+
+// CAMBIO: añadidas funciones en grados para uso directo desde control
+void set_servo_2_grados(TIM_HandleTypeDef *htim, float grados) {
+    set_servo_2(htim, entero_pos(grados));
+}
+
+void set_servo_3_grados(TIM_HandleTypeDef *htim, float grados) {
+    set_servo_3(htim, entero_pos(grados));
+}
+
+uint16_t get_servo_2(void)        { return ANGULO_2; }
+uint16_t get_servo_3(void)        { return ANGULO_3; }
 uint16_t get_servo_revolver(void) { return ANGULO_REVOLVER; }
 
-void reset_motores(TIM_HandleTypeDef *htim){
-	//Motores a sus posiciones iniciales
-	set_servo_2(htim, 1500u); // Motor del codo a 90º
-	set_servo_3(htim, 500u);  // Motor de la muñeca (no sé pero un ángulo para que no se joda)
-	set_servo_revolver(htim, 500u);
-
+void reset_motores(TIM_HandleTypeDef *htim) {
+    set_servo_2(htim, 1500u);
+    set_servo_3(htim, 500u);
+    set_servo_revolver(htim, 500u);
+    motor1_set_velocidad(htim, 0);
 }
 
-
-//////////
-// MOTOR PASO A PASO:
+// ── Stepper + A4988 ───────────────────────────────────────────────────────────
 
 EstadoStepper pap_estado = {0};
 
+uint32_t mm_a_pasos(float mm) {
+    return (uint32_t)(fabsf(mm) * PASOS_POR_MM);
+}
+
+float pasos_a_mm(uint32_t pasos) {
+    return (float)pasos * MM_POR_PASO;
+}
+
 void stepper_iniciar_movimiento(uint32_t pasos, uint8_t horario, uint16_t velocidad_ms) {
-    HAL_GPIO_WritePin(DIR_PAP_GPIO_Port, DIR_PAP_Pin, horario ? GPIO_PIN_SET : GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(DIR_PAP_GPIO_Port, DIR_PAP_Pin,
+                      horario ? GPIO_PIN_SET : GPIO_PIN_RESET);
     pap_estado.pasos_restantes = pasos;
-    pap_estado.intervalo_ms = velocidad_ms;
-    pap_estado.ultimo_tick = HAL_GetTick();
-    pap_estado.nivel_pin = false;
+    pap_estado.intervalo_ms    = velocidad_ms;
+    pap_estado.ultimo_tick     = HAL_GetTick();
+    pap_estado.nivel_pin       = false;
+}
+
+// CAMBIO: añadida stepper_mover_mm — lanza movimiento en mm directamente
+void stepper_mover_mm(float mm, uint16_t velocidad_ms) {
+    if (fabsf(mm) < 0.001f) return;
+    stepper_iniciar_movimiento(mm_a_pasos(mm), (mm > 0) ? 1 : 0, velocidad_ms);
+}
+
+// CAMBIO: añadida stepper_mover_a_mm — mueve a posición absoluta
+void stepper_mover_a_mm(float mm_objetivo, uint16_t velocidad_ms) {
+    float delta = mm_objetivo - stepper_get_posicion_mm();
+    stepper_mover_mm(delta, velocidad_ms);
 }
 
 void stepper_control_tick(void) {
@@ -132,77 +152,169 @@ void stepper_control_tick(void) {
     uint32_t ahora = HAL_GetTick();
     if (ahora - pap_estado.ultimo_tick >= pap_estado.intervalo_ms) {
         pap_estado.ultimo_tick = ahora;
-
-        // Alternar el pin de STEP para crear el flanco
         if (!pap_estado.nivel_pin) {
             HAL_GPIO_WritePin(STEP_PAP_GPIO_Port, STEP_PAP_Pin, GPIO_PIN_SET);
             pap_estado.nivel_pin = true;
         } else {
             HAL_GPIO_WritePin(STEP_PAP_GPIO_Port, STEP_PAP_Pin, GPIO_PIN_RESET);
             pap_estado.nivel_pin = false;
-            pap_estado.pasos_restantes--; // Se completa un paso tras el flanco de bajada
+            pap_estado.pasos_restantes--;
+            // CAMBIO: actualizar posición absoluta al contar cada paso
+            uint8_t horario = HAL_GPIO_ReadPin(DIR_PAP_GPIO_Port, DIR_PAP_Pin);
+            if (horario) pap_estado.posicion_pasos++;
+            else         pap_estado.posicion_pasos--;
         }
     }
 }
 
+bool stepper_en_movimiento(void) {
+    return pap_estado.pasos_restantes > 0;
+}
 
+float stepper_get_posicion_mm(void) {
+    return (float)pap_estado.posicion_pasos * MM_POR_PASO;
+}
 
+void stepper_reset_posicion(void) {
+    pap_estado.posicion_pasos = 0;
+}
 
-//////////////////////////////////////////////////////
-//CONVERSION MOTORES EN GRADOS EN ENTEROS Y VICVERSA
+// ── Lectura estado completo ───────────────────────────────────────────────────
 
-float convertir_grados (uint16_t x, uint16_t in_min, uint16_t in_max, float out_min, float out_max)
+// CAMBIO: get_motoresg sin parámetros — usa globales encIzq/encDer
+// CAMBIO: m.base ahora es getDistanciaMM (mm), no ángulo
+// CAMBIO: m.r1 es ángulo de inclinación desde encDer
+motoresg get_motoresg(void) {
+    motoresg m;
+    m.base = EncoderRobot_getDistanciaMM(&encIzq);  // mm de traslación
+    m.r1   = EncoderRobot_getAnguloGrados(&encDer); // grados inclinación
+    m.r2   = grados_pos(get_servo_2());              // grados codo
+    m.r3   = grados_pos(get_servo_3());              // grados muñeca
+    return m;
+}
+
+// CAMBIO: set_motores usa htim5 en vez de htim1
+bool set_motores(motoresg m) {
+    motor1_set_velocidad(&htim5, (int16_t)m.r1);
+    set_servo_2(&htim5, entero_pos(m.r2));           // CAMBIO: htim1 → htim5
+    set_servo_3(&htim5, entero_pos(m.r3));           // CAMBIO: htim1 → htim5
+    return false;
+}
+
+// ── PID ───────────────────────────────────────────────────────────────────────
+
+float pid_funcion(PID *pid, float error) {
+    if (fabsf(error) < pid->zonamuerta) return 0.0f;
+
+    pid->integral += error * DT_CONTROL;
+    if (pid->integral >  pid->vmax) pid->integral =  pid->vmax;
+    if (pid->integral < -pid->vmax) pid->integral = -pid->vmax;
+
+    float derivada = (error - pid->prev_error) / DT_CONTROL;
+    pid->prev_error = error;
+
+    float u = pid->Kp * error + pid->Ki * pid->integral + pid->Kd * derivada;
+    if (u >  pid->vmax) u =  pid->vmax;
+    if (u < -pid->vmax) u = -pid->vmax;
+    return u;
+}
+
+void control_loop_motores(motoresg objetivo) {
+    if (peligroObstaculo) { motor1_parar(); return; }
+
+    // Traslación: PID sobre distancia en mm
+    float base_actual = EncoderRobot_getDistanciaMM(&encIzq); // CAMBIO
+    float e_base = objetivo.base - base_actual;
+    float u_base = pid_funcion(&pid_base, e_base);
+
+    if (fabsf(u_base) > 0.1f && !stepper_en_movimiento()) {
+        uint16_t intervalo = (uint16_t)(1000.0f / (fabsf(u_base) * PASOS_POR_MM));
+        if (intervalo < 1) intervalo = 1;
+        stepper_mover_mm(e_base > 0 ? MM_POR_PASO : -MM_POR_PASO, intervalo);
+    }
+    if (fabsf(e_base) < 1.0f) { pap_estado.pasos_restantes = 0;  }
+
+    // Inclinación: PID con encoder
+
+    //si el freno esta activo y el objetivo no corresponde con el encoder lo apaga
+    if (freno_R1_activo && fabsf(objetivo.r1 - freno_R1_objetivo) > 1.0f) freno_R1_activo=false;
+    if (!freno_R1_activo && r1_llega(objetivo.r1)) {
+    	freno_R1_objetivo = objetivo.r1;
+    	freno_R1_activo = true;
+    }
+    if (freno_R1_activo) { freno_R1(freno_R1_objetivo);}
+    else motor1_pid_tick(&encDer, objetivo.r1);
+
+    // Servos posicionales: directo a posición en htim5
+    set_servo_2_grados(&htim5, objetivo.r2);
+    set_servo_3_grados(&htim5, objetivo.r3);
+}
+
+bool r1_llega(float objetivo_r1)
 {
-    float res = (float)(x - in_min) * (out_max - out_min) / (float)(in_max - in_min) + out_min;
+    float actual = EncoderRobot_getAnguloGrados(&encDer);
+    float tol = 2.0f; // tolerancia en grados
 
+    return fabsf(actual - objetivo_r1) < tol;
+}
+
+void freno_R1(float objetivo)
+{
+	freno_R1_activo=true;
+	freno_R1_objetivo=objetivo;
+    float actual = EncoderRobot_getAnguloGrados(&encDer);
+    float error = objetivo - actual;
+
+    const float zona_muerta = 2.0f;   // no corregir si esta cerca
+    const float zona_freno  = 5.0f;  // solo corregir si se va MUCHO
+
+    // Dentro de la zona muertA, no vibrar
+    if (fabsf(error) < zona_muerta) {
+        motor1_set_velocidad(&htim5, 0);
+        pid_r1.integral = 0;
+        return;
+    }
+
+    // Si se va un poco, NO corregir
+    if (fabsf(error) < zona_freno) {
+        motor1_set_velocidad(&htim5, 0);
+        return;
+    }
+
+    // Si se va mucho, corregir suave
+    float u = pid_funcion(&pid_r1, error);
+
+    if (u > 25) u = 25;
+    if (u < -25) u = -25;
+
+    motor1_set_velocidad(&htim5, (int8_t)u);
+}
+
+
+// ── Conversión ────────────────────────────────────────────────────────────────
+
+float convertir_grados(uint16_t x, uint16_t in_min, uint16_t in_max,
+                       float out_min, float out_max) {
+    float res = (float)(x - in_min) * (out_max - out_min) /
+                (float)(in_max - in_min) + out_min;
     if (res < out_min) res = out_min;
     if (res > out_max) res = out_max;
-
     return res;
 }
 
-uint16_t convertir_int (float x, float in_min, float in_max, uint16_t out_min, uint16_t out_max)
-{
+uint16_t convertir_int(float x, float in_min, float in_max,
+                       uint16_t out_min, uint16_t out_max) {
     float res = (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
-
     if (res < out_min) res = out_min;
     if (res > out_max) res = out_max;
-
     return (uint16_t)(res + 0.5f);
 }
 
-float grados_pos(uint16_t cord){ return  (180 -convertir_grados(cord, 500, 2500, 0.0f, 180.0f)); }
-
-uint16_t entero_pos(float angulo){ return (3000 - convertir_int(angulo, 0.0f, 180.0f, 500, 2500)); }
-
-float grados_revol(uint16_t cord){ return convertir_grados(cord, 950, 1950, 0.0f, 180.0f); }
-
-uint16_t entero_revol(float angulo){ return convertir_int(angulo, 0.0f, 180.0f, 950, 1950);}
-
-//paso a paso (VAN CON SENSORICA)
-float grados_paso (uint16_t angulo){
-		//float vuelta = angulo * 80; //esto ya no lo tengo yo tan claro, REVISAR
-		//FALTA LA CONVERSION DE LO QUE SEA QUE DE EL SENSOR
-
-		return angulo;
-
-}
-
-uint16_t entero_paso (float angulo){
-		//FALTA LA LOGICA DEL SENSOR
-		return angulo;
-
-}
-
-//servos controlados por rotacion (VAN CON SENSORICA)
-float grados_rot (uint16_t cord){
-	//FALTA LA CONVERSION DE LO QUE SEA QUE DE EL SENSOR
-	return cord;
-
-}
-
-uint16_t entero_rot (float angulo){
-	//FALTA LA CONVERSION DE LO QUE SEA QUE DE EL SENSOR
-	return angulo;
-
-}
+float    grados_pos(uint16_t cord)    { return (180.0f - convertir_grados(cord, 500, 2500, 0.0f, 180.0f)); }
+uint16_t entero_pos(float angulo)     { return (3000u  - convertir_int(angulo, 0.0f, 180.0f, 500, 2500)); }
+float    grados_revol(uint16_t cord)  { return convertir_grados(cord, 950, 1950, 0.0f, 180.0f); }
+uint16_t entero_revol(float angulo)   { return convertir_int(angulo, 0.0f, 180.0f, 950, 1950); }
+float    grados_paso(uint16_t angulo) { return (float)angulo; }
+uint16_t entero_paso(float angulo)    { return (uint16_t)angulo; }
+float    grados_rot(uint16_t cord)    { return (float)cord; }
+uint16_t entero_rot(float angulo)     { return (uint16_t)angulo; }
