@@ -39,17 +39,17 @@ bool cambio_color_revolver(Color c, TIM_HandleTypeDef *htim){
 	if (c==color_act) return true;
     c4d act = posicion_actual();
 
-	if (!dentro_rango(act.coor)) return false; //SUGNIFICA QUE ESTA PEGADO AL LIENZO Y QUE HAY QUE SEPARARLO
+	//if (!dentro_rango(act.coor)) return false; //SUGNIFICA QUE ESTA PEGADO AL LIENZO Y QUE HAY QUE SEPARARLO
 
 	switch (c){
 	case COLOR1:
-		set_servo_revolver(htim, entero_revol(0)); //rotar a 0
+		set_servo_revolver(htim, 500u); //rotar a 0
 		break;
 	case COLOR2:
-		set_servo_revolver(htim, entero_revol(90)); //rotar a 90
+		set_servo_revolver(htim, 1500u);
 		break;
 	case COLOR3:
-		set_servo_revolver(htim, entero_revol(180)); //rotar a 180
+		set_servo_revolver(htim, 2500u);
 		break;
 	}
 
@@ -182,7 +182,7 @@ void dibujar( uint8_t flag_parada, uint8_t flag_ON, TIM_HandleTypeDef *htim_revo
 void prueba_dibujar(c3d objetivo, uint8_t flag_trayctorias){
 	bool i=false;
     motoresg movimiento_motores;
-	i = trayectoria( &movimiento_motores ,objetivo, &flag_trayctorias);
+	i = trayectoria( &movimiento_motores, objetivo, 1);
 	control_loop_motores(movimiento_motores);
 
 }

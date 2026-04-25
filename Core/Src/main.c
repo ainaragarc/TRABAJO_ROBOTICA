@@ -27,6 +27,8 @@
 #include "EncoderRobot.h"
 #include "FinalDeCarrera.h"
 #include "Homing.h"
+#include "movimiento.h"
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -151,6 +153,37 @@ int main(void)
   HAL_Delay(2000);*/
   motor1_set_velocidad(&htim5, 0);
 
+  set_servo_revolver(&htim1, 2000u); //rotar a 0
+
+  	  		  	  HAL_Delay(1000);
+	set_servo_revolver(&htim1, 1500u); //rotar a 0
+
+	  	  HAL_Delay(1000);
+
+	  set_servo_revolver(&htim1, convertir_grados(90, 500, 2500, 0.0f, 180.0f)); //rotar a 0
+
+	  	  HAL_Delay(1000);
+
+
+
+	  	set_servo_revolver(&htim1, convertir_grados(180, 500, 2500, 0.0f, 180.0f)); //rotar a 0
+
+		  	  HAL_Delay(1000);
+
+  cambio_color_revolver(COLOR1, &htim1);
+  	  HAL_Delay(1000);
+  cambio_color_revolver(COLOR2, &htim1);
+  	  HAL_Delay(1000);
+  cambio_color_revolver(COLOR3, &htim1);
+  	  HAL_Delay(1000);
+    cambio_color_revolver(COLOR1, &htim1);
+	  	  HAL_Delay(1000);
+	  	cambio_color_revolver(COLOR2, &htim1);
+	  		  	  HAL_Delay(1000);
+
+	 set_servo_revolver(&htim1, 1500u); //rotar a 0
+
+	  		  		  	  HAL_Delay(1000);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -161,6 +194,7 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
       Robot_Tick();
+
   }
   /* USER CODE END 3 */
 }
@@ -489,6 +523,14 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOD, STEP_PAP_Pin|DIR_PAP_Pin, GPIO_PIN_RESET);
 
+  /*Configure GPIO pins : PA4 PA5 PA8 PA9
+                           PA10 */
+  GPIO_InitStruct.Pin = GPIO_PIN_4|GPIO_PIN_5|GPIO_PIN_8|GPIO_PIN_9
+                          |GPIO_PIN_10;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
   /*Configure GPIO pins : STEP_PAP_Pin DIR_PAP_Pin */
   GPIO_InitStruct.Pin = STEP_PAP_Pin|DIR_PAP_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
@@ -517,7 +559,7 @@ void Robot_InitMotores(void) {
     __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_2, 1500u);
     __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_3, entero_pos(90.0f));
     __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_4, entero_pos(0.0f));
-    __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_3, entero_pos(45.0f));
+    __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_3, entero_pos(0.0f));
 
     HAL_TIM_PWM_Start(&htim5, TIM_CHANNEL_2);
     HAL_TIM_PWM_Start(&htim5, TIM_CHANNEL_3);

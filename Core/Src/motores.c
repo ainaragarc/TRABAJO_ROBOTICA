@@ -186,8 +186,8 @@ void stepper_reset_posicion(void) {
 // CAMBIO: m.r1 es ángulo de inclinación desde encDer
 motoresg get_motoresg(void) {
     motoresg m;
-    m.base = EncoderRobot_getDistanciaMM(&encIzq);  // mm de traslación
-    m.r1   = EncoderRobot_getAnguloGrados(&encDer); // grados inclinación
+    m.base = EncoderRobot_getDistanciaMM(&encDer);  // mm de traslación
+    m.r1   = EncoderRobot_getAnguloGrados(&encIzq); // grados inclinación
     m.r2   = grados_pos(get_servo_2());              // grados codo
     m.r3   = grados_pos(get_servo_3());              // grados muñeca
     return m;
@@ -223,7 +223,7 @@ void control_loop_motores(motoresg objetivo) {
     if (peligroObstaculo) { motor1_parar(); return; }
 
     // Traslación: PID sobre distancia en mm
-    float base_actual = EncoderRobot_getDistanciaMM(&encIzq); // CAMBIO
+    float base_actual = EncoderRobot_getDistanciaMM(&encDer); // CAMBIO
     float e_base = objetivo.base - base_actual;
     float u_base = pid_funcion(&pid_base, e_base);
 
@@ -243,7 +243,7 @@ void control_loop_motores(motoresg objetivo) {
     	freno_R1_activo = true;
     }
     if (freno_R1_activo) { freno_R1(freno_R1_objetivo);}
-    else motor1_pid_tick(&encDer, objetivo.r1);
+    else motor1_pid_tick(&encIzq, objetivo.r1);
 
     // Servos posicionales: directo a posición en htim5
     set_servo_2_grados(&htim5, objetivo.r2);
