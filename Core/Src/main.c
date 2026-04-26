@@ -28,6 +28,8 @@
 #include "FinalDeCarrera.h"
 #include "Homing.h"
 #include "movimiento.h"
+#include "cinematica.h"
+
 
 /* USER CODE END Includes */
 
@@ -70,6 +72,13 @@ struct {
     float angIzq;
     float angDer;
 } telemetria;
+
+c4d prueba_coordenadas;
+c4d coordenadas;
+
+motoresg prueba_motores;
+
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -138,52 +147,6 @@ int main(void)
 
   Robot_InitMotores();
   Robot_InitEncoders();
-/*
-  motor1_mover_grados_estimados(&htim5, 90.0, 200);
-  HAL_Delay(2000);
-
-  motor1_mover_grados_estimados(&htim5, -90.0, 200);
-  HAL_Delay(2000);
-
-  motor1_set_velocidad(&htim5, -1000);
-  HAL_Delay(2000);
-  motor1_set_velocidad(&htim5, 0);
-  HAL_Delay(1000);
-  motor1_set_velocidad(&htim5, 1000);
-  HAL_Delay(2000);*/
-  motor1_set_velocidad(&htim5, 0);
-
-  set_servo_revolver(&htim1, 2000u); //rotar a 0
-
-  	  		  	  HAL_Delay(1000);
-	set_servo_revolver(&htim1, 1500u); //rotar a 0
-
-	  	  HAL_Delay(1000);
-
-	  set_servo_revolver(&htim1, convertir_grados(90, 500, 2500, 0.0f, 180.0f)); //rotar a 0
-
-	  	  HAL_Delay(1000);
-
-
-
-	  	set_servo_revolver(&htim1, convertir_grados(180, 500, 2500, 0.0f, 180.0f)); //rotar a 0
-
-		  	  HAL_Delay(1000);
-
-  cambio_color_revolver(COLOR1, &htim1);
-  	  HAL_Delay(1000);
-  cambio_color_revolver(COLOR2, &htim1);
-  	  HAL_Delay(1000);
-  cambio_color_revolver(COLOR3, &htim1);
-  	  HAL_Delay(1000);
-    cambio_color_revolver(COLOR1, &htim1);
-	  	  HAL_Delay(1000);
-	  	cambio_color_revolver(COLOR2, &htim1);
-	  		  	  HAL_Delay(1000);
-
-	 set_servo_revolver(&htim1, 1500u); //rotar a 0
-
-	  		  		  	  HAL_Delay(1000);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -556,20 +519,17 @@ static void MX_GPIO_Init(void)
 // ── Inicialización ────────────────────────────────────────────────────────────
 
 void Robot_InitMotores(void) {
-    __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_2, 1500u);
-    __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_3, entero_pos(90.0f));
-    __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_4, entero_pos(0.0f));
-    __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_3, entero_pos(0.0f));
+	HAL_TIM_PWM_Start(&htim5, TIM_CHANNEL_2);
+	    HAL_TIM_PWM_Start(&htim5, TIM_CHANNEL_3);
+	    HAL_TIM_PWM_Start(&htim5, TIM_CHANNEL_4);
+	    HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
+	    HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);
 
-    HAL_TIM_PWM_Start(&htim5, TIM_CHANNEL_2);
-    HAL_TIM_PWM_Start(&htim5, TIM_CHANNEL_3);
-    HAL_TIM_PWM_Start(&htim5, TIM_CHANNEL_4);
-    HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);  // Motor inclinación
-    HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);  // Revólver
+	    __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_2, 1500u);
 
-    // Secuencia de centrado mecánico (bloqueante, solo en arranque)
-    float ang_codo_ini = 90.0f, ang_codo_fin = 45.0f;
-    float ang_muneca_ini = 0.0f, ang_muneca_fin = 90.0f;
+	    set_servo_2(&htim5, entero_pos(90.0f));
+	    set_servo_3(&htim5, entero_pos(0.0f));
+	    set_servo_revolver(&htim1, entero_pos(0.0f));
 /*
     __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_2, 2000u);
     HAL_Delay(300);
@@ -656,6 +616,17 @@ void Robot_Tick(void) {
     uint32_t tick = HAL_GetTick();
 
     stepper_control_tick();
+
+    prueba_motores = get_motoresg();
+    motoresg motores_iniciales={
+    		.base = 0.0f,
+    		.r1   = 0.0f,
+    		.r2   = 90.0f,
+			.r3   = 0.0f
+    };
+    prueba_coordenadas = cinematica_directa((motoresg)prueba_motores);
+
+    coordenadas = cinematica_directa((motoresg)motores_iniciales);
 
     static uint32_t t_encoder = 0;
     if (tick - t_encoder >= 10) {

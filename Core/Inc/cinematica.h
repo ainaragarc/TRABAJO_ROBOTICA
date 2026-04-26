@@ -27,11 +27,11 @@
 #define L3 140 //longitud elabon 3 (revolver + boli)
 
 //OTRAS MEDIDAS IMPORTANTES
-#define SEPz 20 //separacion entre el inicio de la corredera y el inicio del lienzo
-#define SEPx 100 //separacion entre centro de gravedad del robot (la movil) HORIZONTAL
-#define SEPy 20 //separacion entre centro de gravedad del robot (la movil) VERTICAL
+#define SEPz 130 //separacion entre el inicio de la corredera y el inicio del lienzo
+#define SEPx 220 //separacion entre centro de gravedad del robot (la movil) HORIZONTAL
+#define SEPy 80 //separacion entre centro de gravedad del robot (la movil) VERTICAL
 
-#define x0 100 //separacion a la parte mas baja del lienzo
+#define x0 170 //separacion a la parte mas baja del lienzo
 
 #define plano 200 //separacion entre centro de gravedad del robot (la movil) VERTICAL
 

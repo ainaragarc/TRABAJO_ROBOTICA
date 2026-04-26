@@ -39,7 +39,7 @@ bool cambio_color_revolver(Color c, TIM_HandleTypeDef *htim){
 	if (c==color_act) return true;
     c4d act = posicion_actual();
 
-	//if (!dentro_rango(act.coor)) return false; //SUGNIFICA QUE ESTA PEGADO AL LIENZO Y QUE HAY QUE SEPARARLO
+	if (!dentro_rango(act.coor)) return false; //SUGNIFICA QUE ESTA PEGADO AL LIENZO Y QUE HAY QUE SEPARARLO
 
 	switch (c){
 	case COLOR1:
