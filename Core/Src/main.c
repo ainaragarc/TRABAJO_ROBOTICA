@@ -609,9 +609,8 @@ void Robot_DebugSistema(void) {
 // ── Bucle principal ───────────────────────────────────────────────────────────
 
 void Robot_Tick(void) {
-    //Homing_Tick();
 
-  //  if (!Homing_EstaCompleto()) return;
+    if (!Homing_EstaCompleto()) Homing_Tick(); //Homing
 
     uint32_t tick = HAL_GetTick();
 
