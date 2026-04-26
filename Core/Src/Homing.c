@@ -81,6 +81,8 @@ void Homing_Tick(void) {
                 estado   = HOMING_RETROCESO_T;
                 printf("HOMING: traslacion en limite, retrocediendo\r\n");
             }
+
+            pap_estado.pasos_restantes = 1;
             break;
 
         case HOMING_RETROCESO_T:

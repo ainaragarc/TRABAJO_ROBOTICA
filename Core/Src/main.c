@@ -147,6 +147,8 @@ int main(void)
 
   Robot_InitMotores();
   Robot_InitEncoders();
+
+  stepper_iniciar_movimiento(50, 1, 2);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -610,7 +612,7 @@ void Robot_DebugSistema(void) {
 
 void Robot_Tick(void) {
 
-    if (!Homing_EstaCompleto()) Homing_Tick(); //Homing
+    // if (!Homing_EstaCompleto()) Homing_Tick(); //Homing
 
     uint32_t tick = HAL_GetTick();
 
