@@ -21,6 +21,9 @@ static Color     color_inicio = COLOR1;
 static bool      activo       = false;
 static puntos    dibujo       = {0};
 static uint32_t  t_color      = 0;
+static uint32_t  t_estado     = 0;  /* M11: timeout por estado */
+
+#define TIMEOUT_ESTADO_MS   8000u   /* 8s máximo por waypoint antes de ir a reposo */
 
 /* Posición de reposo: frente al lienzo, herramienta retirada */
 static const c3d REPOSO = { .x = SEPx, .y = SEPy + 50, .z = SEPz };
@@ -56,6 +59,7 @@ bool cambio_color_revolver(Color c, TIM_HandleTypeDef *htim) {
     case COLOR1: set_servo_revolver(htim,  500u); break;
     case COLOR2: set_servo_revolver(htim, 1500u); break;
     case COLOR3: set_servo_revolver(htim, 2500u); break;
+    default: return false;  /* M9: color inválido */
     }
     return true;
 }
@@ -74,8 +78,9 @@ void movimiento_cargar_mision(void) {
 void movimiento_iniciar(void) {
     if (estado != MOV_IDLE) return;
     velocidad_reset();
-    activo = true;
-    estado = MOV_VIAJE;
+    activo   = true;
+    estado   = MOV_VIAJE;
+    t_estado = HAL_GetTick();
 }
 
 void movimiento_parar(void) {
@@ -90,27 +95,40 @@ bool movimiento_activo(void) { return activo; }
 void movimiento_tick(void) {
     if (estado == MOV_IDLE) return;
 
+    /* M11: timeout global — si un estado lleva más de TIMEOUT_ESTADO_MS, ir a reposo */
+    if (activo && (HAL_GetTick() - t_estado) > TIMEOUT_ESTADO_MS &&
+        estado != MOV_CAMBIO_COLOR && estado != MOV_REPOSO) {
+        velocidad_reset();
+        activo = false;
+        estado = MOV_REPOSO;
+    }
+
     switch (estado) {
 
     /* 1. Volar hasta la posición de aproximación del punto actual */
     case MOV_VIAJE:
-        if (ejecutar(plano_retroceso(dibujo.p[color_actual][idx_punto]), 0))
-            estado = MOV_APROXIMAR;
+        if (ejecutar(plano_retroceso(dibujo.p[color_actual][idx_punto]), 0)) {
+            estado   = MOV_APROXIMAR;
+            t_estado = HAL_GetTick();
+        }
         break;
 
     /* 2. Acercarse al lienzo (herramienta entra en contacto) */
     case MOV_APROXIMAR:
-        if (ejecutar(plano_dibujo(dibujo.p[color_actual][idx_punto]), 1))
-            estado = MOV_DIBUJAR;
+        if (ejecutar(plano_dibujo(dibujo.p[color_actual][idx_punto]), 1)) {
+            estado   = MOV_DIBUJAR;
+            t_estado = HAL_GetTick();
+        }
         break;
 
     /* 3. Trazar sobre el lienzo avanzando punto a punto sin levantar */
     case MOV_DIBUJAR:
         if (ejecutar(plano_dibujo(dibujo.p[color_actual][idx_punto]), 2)) {
+            t_estado = HAL_GetTick();
             if (idx_punto < NUMERO_PUNTOS - 1) {
-                idx_punto++;          /* siguiente punto, la herramienta no se levanta */
+                idx_punto++;
             } else {
-                estado = MOV_RETIRAR; /* último punto alcanzado */
+                estado = MOV_RETIRAR;
             }
         }
         break;
@@ -121,8 +139,9 @@ void movimiento_tick(void) {
             idx_punto    = 0;
             color_actual = color_siguiente(color_actual);
             cambio_color_revolver(color_actual, &htim1);
-            t_color = HAL_GetTick();
-            estado  = MOV_CAMBIO_COLOR;
+            t_color  = HAL_GetTick();
+            t_estado = HAL_GetTick();
+            estado   = MOV_CAMBIO_COLOR;
         }
         break;
 

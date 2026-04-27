@@ -1,13 +1,10 @@
 #include <stdlib.h>
 #include "cinematica.h"
 
-static motoresg motores_actualesg;
-
 static float vx_prev = 0.0f;
 static float vy_prev = 0.0f;
 static float vz_prev = 0.0f;
 
-// CAMBIO: posicion_actual y motoresg_actual llaman a get_motoresg() sin parámetros
 c4d posicion_actual(void)      { return cinematica_directa(get_motoresg()); }
 motoresg motoresg_actual(void) { return get_motoresg(); }
 
@@ -29,9 +26,11 @@ float restriccion_angulos(float a) {
 }
 
 bool dentro_rango(c3d cor) {
-    if (cor.z < 0 || cor.z > LBASE)      return false;
-    if (cor.y < 20 || cor.y > SEPy+plano) return false;
-    if (cor.x > x0+cor.y-20)             return false;
+    if (cor.z < 0 || cor.z > LBASE)         return false;
+    if (cor.y < 20 || cor.y > SEPy + plano) return false;
+    if (cor.x > x0 + cor.y - 20)            return false;
+    /* M4: cota inferior de x — el brazo no puede extenderse más de L1+L2 hacia atrás */
+    if (cor.x < -(L1 + L2))                 return false;
     return true;
 }
 
@@ -77,13 +76,10 @@ c3d plano_retroceso(c2d cor) {
 }
 
 // ── 3. Cinemática directa ─────────────────────────────────────────────────────
-// CAMBIO: recibe motoresg donde base es mm (no grados)
-// CAMBIO: vuelta.coor.z = m.base directamente (ya está en mm)
 
 c4d cinematica_directa(motoresg m) {
     c4d vuelta = {0};
 
-    // CAMBIO: base ya es mm, no hay que convertir
     vuelta.coor.z = (int16_t)roundf(m.base);
 
     float t1 = radianes(-m.r1);
@@ -98,26 +94,53 @@ c4d cinematica_directa(motoresg m) {
 }
 
 // ── 4. Cinemática inversa ─────────────────────────────────────────────────────
-// CAMBIO: mot.base = cor.z directamente en mm (no convertir a grados)
 
 motoresg cinematica_inversa(c3d cor) {
     motoresg mot = {0};
-
-    // CAMBIO: base en mm directamente
     mot.base = (float)cor.z;
 
-    float x    = cor.x - L3;
+    float x    = cor.x - L3;   /* posición de la muñeca (L3 horizontal) */
     float y    = cor.y;
     float arg2 = (x*x + y*y - L1*L1 - L2*L2) / (2.0f * L1 * L2);
     if (arg2 >  1.0f) arg2 =  1.0f;
     if (arg2 < -1.0f) arg2 = -1.0f;
-    float t2 = -acosf(arg2);
-    float t1 = atan2f(y, x) - atan2f(L2*sinf(t2), L1 + L2*cosf(t2));
+
+    /* El IK de 2 eslabones tiene dos soluciones (codo arriba / codo abajo).
+       Se elige la que deje R1 más cerca de R1_PREFERIDO dentro de [R1_MIN, R1_MAX],
+       reduciendo así el torque gravitacional sobre el motor de inclinación. */
+    float t2_A = -acosf(arg2);   /* codo arriba */
+    float t2_B =  acosf(arg2);   /* codo abajo  */
+
+    float base_ang = atan2f(y, x);
+    float t1_A = base_ang - atan2f(L2*sinf(t2_A), L1 + L2*cosf(t2_A));
+    float t1_B = base_ang - atan2f(L2*sinf(t2_B), L1 + L2*cosf(t2_B));
+
+    float r1_A = 180.0f - grados(t1_A);
+    float r1_B = 180.0f - grados(t1_B);
+
+    bool  A_ok  = (r1_A >= R1_MIN_GRADOS && r1_A <= R1_MAX_GRADOS);
+    bool  B_ok  = (r1_B >= R1_MIN_GRADOS && r1_B <= R1_MAX_GRADOS);
+    bool  A_mejor;
+
+    if (A_ok && B_ok) {
+        /* Ambas en rango: la más próxima a R1_PREFERIDO */
+        A_mejor = fabsf(r1_A - R1_PREFERIDO_GRADOS) <= fabsf(r1_B - R1_PREFERIDO_GRADOS);
+    } else if (A_ok) {
+        A_mejor = true;
+    } else if (B_ok) {
+        A_mejor = false;
+    } else {
+        /* Ninguna en rango: la menos mala */
+        A_mejor = fabsf(r1_A - R1_PREFERIDO_GRADOS) <= fabsf(r1_B - R1_PREFERIDO_GRADOS);
+    }
+
+    float t1 = A_mejor ? t1_A : t1_B;
+    float t2 = A_mejor ? t2_A : t2_B;
     float t3 = -(t1 + t2);
 
     mot.r1 = restriccion_angulos(roundf(180.0f - grados(t1)));
-    mot.r2 = restriccion_angulos(roundf(-grados(t2)));
-    mot.r3 = restriccion_angulos(roundf(-grados(t3)));
+    mot.r2 = fminf(R2R3_MAX_GRADOS, restriccion_angulos(roundf(-grados(t2))));
+    mot.r3 = fminf(R2R3_MAX_GRADOS, restriccion_angulos(roundf(-grados(t3))));
 
     return mot;
 }
@@ -241,7 +264,7 @@ void velocidad_transicion(c3d act, c3d obj, c3d *velocidades, uint8_t flag) {
 // ── 7. Trayectoria jacobiana ──────────────────────────────────────────────────
 
 bool trayectoria(motoresg *salida, c3d obj, uint8_t *flagdibujo) {
-    motores_actualesg = get_motoresg();
+    motoresg motores_actualesg = get_motoresg();
     c4d act = cinematica_directa(motores_actualesg);
 
     if (objetivo_alcanzado(act.coor, obj, TOLERANCIA_MM)) {
@@ -287,7 +310,7 @@ bool trayectoria(motoresg *salida, c3d obj, uint8_t *flagdibujo) {
 // ── 8. Trayectoria Bresenham ──────────────────────────────────────────────────
 
 bool trayectoria_cutre(motoresg *salida, c3d obj, uint8_t *flagdibujo) {
-    motores_actualesg = get_motoresg();
+    motoresg motores_actualesg = get_motoresg();
     c4d act4 = cinematica_directa(motores_actualesg);
     c3d act  = act4.coor;
 

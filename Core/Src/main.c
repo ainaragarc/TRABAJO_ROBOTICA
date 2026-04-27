@@ -61,7 +61,7 @@ FinalDeCarrera limiteTraslacion_A;   /* PA9  — home corredera                *
 FinalDeCarrera limiteTraslacion_B;   /* PA10 — fin de corredera              */
 FinalDeCarrera limiteInclinacion;    /* PA8  — home inclinación              */
 
-bool peligroObstaculo = false;
+volatile bool peligroObstaculo = false;
 
 typedef enum {
     MAIN_INIT = 0,
@@ -519,7 +519,8 @@ static void MX_GPIO_Init(void)
 static void Robot_InitPerifericos(void)
 {
     EncoderRobot_init(&encoderInclinacion, &htim2, 4000, 65.0f);
-    EncoderRobot_init(&encoderTraslacion,  &htim3, 4000, 8.0f / 3.14159265f);
+    /* C1: usar init_lineal para el husillo — 8 mm/vuelta sin calcular diámetro virtual */
+    EncoderRobot_init_lineal(&encoderTraslacion, &htim3, 4000, 8.0f);
     EncoderRobot_inicializar(&encoderInclinacion);
     EncoderRobot_inicializar(&encoderTraslacion);
 

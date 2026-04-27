@@ -62,10 +62,20 @@
 #define ANG             0.70710678f /* sin/cos 45° — inclinación del lienzo  */
 #define ANGinicial      0.0f        /* ángulo R1 en el fin de carrera PA8     */
 
+/* Rango de R1 para minimizar torque gravitacional en el motor.
+   La IK elige la solución (codo arriba/abajo) cuyo R1 esté más cerca de
+   R1_PREFERIDO_GRADOS dentro de [R1_MIN, R1_MAX]. Si ninguna cabe en el
+   rango, usa la más cercana (sin forzar el motor a una posición imposible).
+   Ajusta R1_MAX según dónde coloques el lienzo. */
+#define R1_PREFERIDO_GRADOS   90.0f   /* objetivo ideal: mínimo torque          */
+#define R1_MIN_GRADOS         80.0f   /* no bajar de aquí                       */
+#define R1_MAX_GRADOS        150.0f   /* límite superior — mueve el lienzo      */
+#define R2R3_MAX_GRADOS       30.0f   /* máximo ángulo de codo y muñeca         */
+
 #define vmax            20.0f       /* velocidad cartesiana máxima (mm/s)     */
 #define amax            2.0f        /* aceleración máxima (mm/s²)             */
 #define vconst          10.0f       /* velocidad constante de dibujo (mm/s)   */
-#define TOLERANCIA_MM   5.0f        /* tolerancia de llegada al objetivo (mm) */
+#define TOLERANCIA_MM   2.0f        /* tolerancia de llegada al objetivo (mm) */
 /* DT_CONTROL viene de motores.h (incluido arriba) */
 
 #ifndef M_PI
