@@ -2,123 +2,118 @@
 #define INC_CINEMATICA_H_
 
 #include <stdint.h>
-#include <stdbool.h> //para poder usar bool
-#include <stddef.h> //para poder usar NULL
+#include <stdbool.h>
+#include <stddef.h>
 #include <math.h>
 #include "motores.h"
 
 /*
-	PLAN DE ESTE ARCHIVO
-
-	- 1 - PASO DE COORDENADAS NORMALES AL PLANO_DIBUJO
-	- 2 - FUNCIÓN CINEMATICA DIRECTA
-	- 3 - FUNCIÓN CINEMATICA INVERSA ¡CON RESTRICCIONES!
-	- 4 - FUNCIÓN SEGUIR TRAYECTORIAS
-
-	EL EJE Y ES EL DE LA ALTURA DEL ROBOT, EL EJE X ES EL DE EL DESPLAZAMIENTO DEL ROBOT
-	EJE Z ES EL DE LA CORREDERA
-
+ * SISTEMA DE COORDENADAS DEL ROBOT
+ * ────────────────────────────────────────────────────────────────────────────
+ *  Z  (corredera)  mm desde home (PA9 = limiteTraslacion_A). Rango 0..LBASE.
+ *  X  (alcance)    mm desde pivote del brazo, positivo hacia el lienzo.
+ *  Y  (altura)     mm desde pivote del brazo, positivo hacia arriba.
+ *
+ * ÁNGULOS DE MOTORES  (todos en grados, rango 0..180)
+ *  R1 hombro   0 = horizontal hacia atrás (home, PA8 activo), 90 = brazo
+ *              vertical arriba, 180 = horizontal hacia el lienzo.
+ *              Encoder incrementa al girar hacia arriba. TIM2 (PA0/PB3).
+ *  R2 codo     0 = extendido (L2 continúa dirección de L1).
+ *              Servo posicional TIM5_CH3.
+ *  R3 muñeca   0 = extendido.
+ *              Servo posicional TIM5_CH4.
+ *
+ * CONVENCIÓN FK INTERNA
+ *  t_fk = -R_grados * π/180   (flip de signo por hardware)
+ *  x =  -(L1·cos t1 + L2·cos(t1+t2) + L3·cos(t1+t2+t3))
+ *  y =  -(L1·sin t1 + L2·sin(t1+t2) + L3·sin(t1+t2+t3))
+ *  La IK es coherente: devuelve R = -grados(t_ik) con t_ik de atan2.
+ *  La IK asume L3 horizontal (t3 = -(t1+t2)), que mantiene la herramienta
+ *  perpendicular al lienzo durante el dibujo.
+ *
+ * LIENZO
+ *  El lienzo está inclinado ~45° respecto al brazo (ANG = sin 45°).
+ *  Coordenadas de dibujo c2d: z = posición en corredera, y = altura en lienzo.
+ *  plano_dibujo    → punto en contacto con el lienzo.
+ *  plano_retroceso → mismo punto pero 20 mm retirado del lienzo.
+ *
+ * MODOS DE TRAYECTORIA (flagdibujo)
+ *  0 → desplazamiento libre hacia objetivo (sin contacto)
+ *  1 → aproximación al lienzo (avanza en X hasta SEPx)
+ *  2 → dibujo (mantiene X, mueve Y y Z)
+ *  3 → retirada del lienzo (retrocede X hasta SEPx-20)
+ * ────────────────────────────────────────────────────────────────────────────
  */
 
-//MEDIDA DE LOS ESLABONES
-#define LBASE 430 //longitud base (corredera) en mm
-#define L1 139 //longitud elabon 1
-#define L2 123 //longitud elabon 2
-#define L3 140 //longitud elabon 3 (revolver + boli)
+/* ── Dimensiones del robot ───────────────────────────────────────────────── */
+#define LBASE   430         /* longitud útil de la corredera (mm)            */
+#define L1      139         /* longitud eslabón 1, hombro-codo (mm)          */
+#define L2      123         /* longitud eslabón 2, codo-muñeca (mm)          */
+#define L3      140         /* longitud eslabón 3, muñeca-herramienta (mm)   */
 
-//OTRAS MEDIDAS IMPORTANTES
-#define SEPz 20 //separacion entre el inicio de la corredera y el inicio del lienzo
-#define SEPx 100 //separacion entre centro de gravedad del robot (la movil) HORIZONTAL
-#define SEPy 20 //separacion entre centro de gravedad del robot (la movil) VERTICAL
+/* ── Referencias del lienzo ──────────────────────────────────────────────── */
+#define SEPz    20          /* mm entre home corredera y borde inferior lienzo*/
+#define SEPx    100         /* alcance nominal al lienzo (mm)                */
+#define SEPy    20          /* altura nominal del borde inferior del lienzo   */
+#define x0      100         /* alcance al punto más bajo del lienzo           */
+#define plano   200         /* altura del lienzo (mm)                         */
 
-#define x0 100 //separacion a la parte mas baja del lienzo
+/* ── Parámetros cinemáticos ─────────────────────────────────────────────── */
+#define ANG             0.70710678f /* sin/cos 45° — inclinación del lienzo  */
+#define ANGinicial      0.0f        /* ángulo R1 en el fin de carrera PA8     */
 
-#define plano 200 //separacion entre centro de gravedad del robot (la movil) VERTICAL
-
-#define ANG (0.70710678f) //inclinacion a 45º
-#define ANGinicial (0.0f) //angulo incial debido al final de carrera en grados
-
-#define vmax 20
-#define amax 2.0f
-
-#define vconst 10
-#define DT_CONTROL  0.01f
-
+#define vmax            20.0f       /* velocidad cartesiana máxima (mm/s)     */
+#define amax            2.0f        /* aceleración máxima (mm/s²)             */
+#define vconst          10.0f       /* velocidad constante de dibujo (mm/s)   */
+#define TOLERANCIA_MM   5.0f        /* tolerancia de llegada al objetivo (mm) */
+/* DT_CONTROL viene de motores.h (incluido arriba) */
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
 
-//COORDENADAS
-
-//CUIDADITO CON EL SIGNO
-typedef struct
-{
-	int16_t z;
-	int16_t y;
-
-} c2d; //SON LAS COORDENADAS 2D DE DIBUJO (se reserva x para el movimiento rotativo del robot)
-
-typedef struct
-{
-	int16_t x;
-	int16_t y;
-	int16_t z;
-} c3d;
-
-typedef struct
-{
-	c3d coor;
-	float ang;
-} c4d; //coordenadas 3d mas la orientacion de la punta
-
+/* ── Tipos de coordenadas ────────────────────────────────────────────────── */
+typedef struct { int16_t z; int16_t y; }          c2d; /* coord. sobre lienzo */
+typedef struct { int16_t x; int16_t y; int16_t z; } c3d; /* coord. robot 3D  */
+typedef struct { c3d coor; float ang; }            c4d; /* pose (pos+ángulo)  */
 
 typedef struct {
-    float j11; //fila 1 columna 1
-    float j12; //fila 1 columna 2
-    float j21; //fila 2 columna 1
-    float j22; //fila 2 columna 2
+    float j11; float j12;
+    float j21; float j22;
 } jcb2;
 
+/* ── Conversiones ────────────────────────────────────────────────────────── */
+float    radianes(float g);
+float    grados(float r);
+motoresg conv_grados_rad(motoresg mot);
+float    restriccion_angulos(float a);
 
-float radianes (float g);
-float grados (float r);
-motores conv_entero( motoresg mot);
-motoresg conv_grados( motores mot);
-motoresg conv_grados_rad( motoresg mot);
-float restriccion_angulos(float a);
-
-c4d posicion_actual(void);
+/* ── Estado actual ───────────────────────────────────────────────────────── */
+c4d      posicion_actual(void);
 motoresg motoresg_actual(void);
-motores motores_actual(void);
 
+/* ── Transformadas de lienzo ─────────────────────────────────────────────── */
+c3d  plano_dibujo(c2d cor);      /* punto de contacto con el lienzo          */
+c3d  plano_retroceso(c2d cor);   /* mismo punto, 20 mm retirado del lienzo   */
+bool dentro_rango(c3d cor);
 
-//1. PASO DE COORDENADAS A DIBUJO
-//asumiendo que el 0,0 esta abajo a la izquierda
-c3d plano_dibujo( c2d cor); //da coordenada del plano de dibujo
-c3d plano_no_dibujo(c2d cor); //da coordenada a 2cm del plano de  dibujo
-bool dentro_rango( c3d cor);
+/* ── Cinemática directa e inversa ────────────────────────────────────────── */
+c4d      cinematica_directa(motoresg m);
+motoresg cinematica_inversa(c3d cor);
 
+/* ── Planificación de trayectorias ───────────────────────────────────────── */
+bool objetivo_alcanzado(c3d act, c3d obj, float tol_mm);
+void velocidad_reset(void);
 
-
-//2. CINEMATICA DIRECTA
-//DEVUELVE LAS COORDENADAS DDE LA PUNTA
-c4d cinematica_directa( motoresg m);
-
-
-//3. CINEMATICA INVERSA
-motoresg cinematica_inversa( c3d cor);
-
-//4. SEGUIR TRAYECTORIAS
 jcb2 jacobiana(float t1, float t2);
-void jacobiana_siguiente(float t1, float t2, float xd, float yd, float *t1d, float *t2d, float *t3d);
+void jacobiana_siguiente(float t1, float t2, float xd, float yd,
+                         float *t1d, float *t2d, float *t3d);
 
-void velocidad_dibujo_recta(c3d act, c3d objetivo, c3d *velocidades);
-void velocidad_recta(c3d act, c3d obj, c3d *velocidades);
-void velocidad_transicion(c3d act, c3d obj, c3d *velocidades, uint8_t flag);
+void velocidad_recta(c3d act, c3d obj, c3d *vel);
+void velocidad_dibujo_recta(c3d act, c3d objetivo, c3d *vel);
+void velocidad_transicion(c3d act, c3d obj, c3d *vel, uint8_t flag);
 
 bool trayectoria(motoresg *salida, c3d obj, uint8_t *flagdibujo);
-
 bool trayectoria_cutre(motoresg *salida, c3d obj, uint8_t *flagdibujo);
 
-#endif
+#endif /* INC_CINEMATICA_H_ */

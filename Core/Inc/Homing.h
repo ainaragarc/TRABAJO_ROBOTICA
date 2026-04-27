@@ -5,13 +5,13 @@
 #include <stdbool.h>
 
 typedef enum {
-    HOMING_IDLE,
-    HOMING_TRASLACION,
-    HOMING_RETROCESO_T,
-    HOMING_INCLINACION,
-    HOMING_RETROCESO_I,
+    HOMING_IDLE = 0,
+    HOMING_R1_BUSCAR,       /* buscando PA8 en inclinación (auto-dirección)  */
+    HOMING_R1_BACKOFF,      /* separándose de PA8                            */
+    HOMING_TRAS_BUSCAR,     /* buscando PA9 en traslación (auto-dirección)   */
+    HOMING_TRAS_BACKOFF,    /* separándose de PA9                            */
     HOMING_COMPLETO,
-    HOMING_ERROR
+    HOMING_ERROR,
 } HomingEstado;
 
 void         Homing_Iniciar(void);
@@ -20,4 +20,4 @@ bool         Homing_EstaCompleto(void);
 bool         Homing_EstaActivo(void);
 HomingEstado Homing_GetEstado(void);
 
-#endif
+#endif /* HOMING_H */

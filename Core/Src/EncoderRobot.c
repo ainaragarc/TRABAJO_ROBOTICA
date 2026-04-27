@@ -12,7 +12,11 @@ void EncoderRobot_inicializar(EncoderRobot* e) {
 }
 
 void EncoderRobot_registrarVueltaZ(EncoderRobot* e) {
-    e->vueltas++;
+    if (e->htim->Instance->CR1 & TIM_CR1_DIR) {
+        e->vueltas--;
+    } else {
+        e->vueltas++;
+    }
     __HAL_TIM_SET_COUNTER(e->htim, 0);
 }
 

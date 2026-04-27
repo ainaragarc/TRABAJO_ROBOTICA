@@ -37,6 +37,7 @@ typedef struct {
     float prev_error;
     float vmax;
     float zonamuerta;
+    float dt;   /* periodo real medido (s); 0 = usar DT_CONTROL */
 } PID;
 
 float pid_funcion(PID *pid, float error);
@@ -92,7 +93,7 @@ uint32_t mm_a_pasos(float mm);
 float    pasos_a_mm(uint32_t pasos);
 
 // ── Lectura y escritura de estado ─────────────────────────────────────────────
-// CAMBIO: sin parámetros — usa globales encIzq/encDer
+// CAMBIO: sin parámetros — usa globales encoderInclinacion/encoderTraslacion
 motoresg get_motoresg(void);
 bool     set_motores(motoresg m);
 void     control_loop_motores(motoresg objetivo);

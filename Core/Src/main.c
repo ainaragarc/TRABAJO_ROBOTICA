@@ -2,17 +2,19 @@
 /**
   ******************************************************************************
   * @file           : main.c
-  * @brief          : Main program body
-  ******************************************************************************
-  * @attention
+  * @brief          : Programa de prueba progresiva del robot.
   *
-  * Copyright (c) 2026 STMicroelectronics.
-  * All rights reserved.
-  *
-  * This software is licensed under terms that can be found in the LICENSE file
-  * in the root directory of this software component.
-  * If no LICENSE file comes with this software, it is provided AS-IS.
-  *
+  * Hardware confirmado (del .ioc):
+  *  - PA0/PB3   TIM2 encoder izquierdo (rotación continua de inclinación)
+  *  - PA6/PA7   TIM3 encoder derecho   (acoplado al husillo de traslación)
+  *  - PA1       TIM5_CH2 servo continuo "base/inclinación"
+  *  - PA2       TIM5_CH3 servo posicional "codo"
+  *  - PA3       TIM5_CH4 servo posicional "muñeca"
+  *  - PE13      TIM1_CH3 servo revólver
+  *  - PD0/PD1   STEP/DIR stepper traslación (8 mm/vuelta, 200 pasos/vuelta)
+  *  - PA8       fin de carrera inclinación (EXTI)
+  *  - PA9, PA10 finales de carrera traslación (EXTI)
+  *  - PA4, PA5  canal Z encoders (EXTI, opcional)
   ******************************************************************************
   */
 /* USER CODE END Header */
@@ -22,28 +24,27 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdbool.h>
+#include <stdio.h>
+#include <math.h>
 
 #include "motores.h"
 #include "EncoderRobot.h"
 #include "FinalDeCarrera.h"
-#include "Homing.h"
 #include "movimiento.h"
-
+#include "Homing.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define ANG_NEUTRO    90.0f     /* ángulo neutro de servos posicionales */
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
-
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
@@ -53,23 +54,31 @@ TIM_HandleTypeDef htim3;
 TIM_HandleTypeDef htim5;
 
 /* USER CODE BEGIN PV */
-// Encoder 1: Timer 2, 600 pulsos, rueda 65mm
-EncoderRobot encIzq;
+EncoderRobot encoderInclinacion;     /* Inclinación — TIM2, PA0/PB3          */
+EncoderRobot encoderTraslacion;      /* Traslación  — TIM3, PA6/PA7          */
 
-// Encoder 2: Timer 3, 600 pulsos, rueda 65mm
-EncoderRobot encDer;
-
-
-FinalDeCarrera limiteTraslacion;
-FinalDeCarrera limiteInclinacion;
+FinalDeCarrera limiteTraslacion_A;   /* PA9  — home corredera                */
+FinalDeCarrera limiteTraslacion_B;   /* PA10 — fin de corredera              */
+FinalDeCarrera limiteInclinacion;    /* PA8  — home inclinación              */
 
 bool peligroObstaculo = false;
-struct {
-    float distIzq;
-    float distDer;
-    float angIzq;
-    float angDer;
-} telemetria;
+
+typedef enum {
+    MAIN_INIT = 0,
+    MAIN_HOMING,
+    MAIN_POSICION_FINAL,
+    MAIN_LISTO,
+    MAIN_ERROR,
+} EstadoMain;
+
+static EstadoMain estado_main = MAIN_INIT;
+
+typedef struct { c3d punto; uint8_t flag; } Waypoint;
+
+#define MAX_WAYPOINTS   20u
+static Waypoint secuencia[MAX_WAYPOINTS];
+static uint8_t  n_waypoints = 0;
+static uint8_t  idx_wp      = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -80,21 +89,16 @@ static void MX_TIM5_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_TIM3_Init(void);
 /* USER CODE BEGIN PFP */
-void Robot_InitMotores(void);
-void Robot_InitEncoders(void);
-void Robot_ActualizarTelemetria(void);
-void Robot_TestEncoderManual(void);
-void Robot_DebugSistema(void);
-void Robot_VerificarLimites(void);
-void Robot_Tick(void);
+static void Robot_InitPerifericos(void);
+static void Robot_VerificarLimites(void);
+static void parar_todo_motores(void);
+static void test_rapido(void);
+static void construir_secuencia(void);
+static void Main_Tick(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-#include <stdio.h>
-#include <math.h>
-
-
 /* USER CODE END 0 */
 
 /**
@@ -131,59 +135,16 @@ int main(void)
   MX_TIM2_Init();
   MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
-  EncoderRobot_init(&encIzq, &htim2, 4000, 65.0f);
-  EncoderRobot_init(&encDer, &htim3, 4000, 65.0f);
-  FinalDeCarrera_init(&limiteTraslacion,  GPIOA, GPIO_PIN_10, false);
-  FinalDeCarrera_init(&limiteInclinacion, GPIOA, GPIO_PIN_11, false);
+    Robot_InitPerifericos();
 
-  Robot_InitMotores();
-  Robot_InitEncoders();
-/*
-  motor1_mover_grados_estimados(&htim5, 90.0, 200);
-  HAL_Delay(2000);
+    /* Posición segura inicial — servos a neutro, stepper parado */
+    motor1_set_velocidad(&htim5, 0);
+    set_servo_2(&htim5, entero_pos(ANG_NEUTRO));
+    set_servo_3(&htim5, entero_pos(ANG_NEUTRO));
+    set_servo_revolver(&htim1, 500u);
+    HAL_Delay(1000);
 
-  motor1_mover_grados_estimados(&htim5, -90.0, 200);
-  HAL_Delay(2000);
-
-  motor1_set_velocidad(&htim5, -1000);
-  HAL_Delay(2000);
-  motor1_set_velocidad(&htim5, 0);
-  HAL_Delay(1000);
-  motor1_set_velocidad(&htim5, 1000);
-  HAL_Delay(2000);*/
-  motor1_set_velocidad(&htim5, 0);
-
-  set_servo_revolver(&htim1, 2000u); //rotar a 0
-
-  	  		  	  HAL_Delay(1000);
-	set_servo_revolver(&htim1, 1500u); //rotar a 0
-
-	  	  HAL_Delay(1000);
-
-	  set_servo_revolver(&htim1, convertir_grados(90, 500, 2500, 0.0f, 180.0f)); //rotar a 0
-
-	  	  HAL_Delay(1000);
-
-
-
-	  	set_servo_revolver(&htim1, convertir_grados(180, 500, 2500, 0.0f, 180.0f)); //rotar a 0
-
-		  	  HAL_Delay(1000);
-
-  cambio_color_revolver(COLOR1, &htim1);
-  	  HAL_Delay(1000);
-  cambio_color_revolver(COLOR2, &htim1);
-  	  HAL_Delay(1000);
-  cambio_color_revolver(COLOR3, &htim1);
-  	  HAL_Delay(1000);
-    cambio_color_revolver(COLOR1, &htim1);
-	  	  HAL_Delay(1000);
-	  	cambio_color_revolver(COLOR2, &htim1);
-	  		  	  HAL_Delay(1000);
-
-	 set_servo_revolver(&htim1, 1500u); //rotar a 0
-
-	  		  		  	  HAL_Delay(1000);
+    Homing_Iniciar();
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -193,10 +154,10 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-      Robot_Tick();
-
-  }
+        stepper_control_tick();   /* siempre — genera pulsos del stepper */
+        Main_Tick();              /* ciclo de vida del robot             */
   /* USER CODE END 3 */
+  }
 }
 
 /**
@@ -538,155 +499,196 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
   HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
 
-  /* USER CODE BEGIN MX_GPIO_Init_2 */
-  // Fines de carrera: PA10 (izquierdo) y PA11 (derecho)
-  // Modo EXTI con PULLUP interno. El microswitch conecta a GND (contacto NO).
-  GPIO_InitStruct.Pin  = GPIO_PIN_10 | GPIO_PIN_11;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
-  GPIO_InitStruct.Pull = GPIO_PULLUP;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+  /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI4_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI4_IRQn);
 
-  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 2, 0);
+  HAL_NVIC_SetPriority(EXTI9_5_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
+
+  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
+
+  /* USER CODE BEGIN MX_GPIO_Init_2 */
+
   /* USER CODE END MX_GPIO_Init_2 */
 }
 
 /* USER CODE BEGIN 4 */
 
-// ── Inicialización ────────────────────────────────────────────────────────────
+static void Robot_InitPerifericos(void)
+{
+    EncoderRobot_init(&encoderInclinacion, &htim2, 4000, 65.0f);
+    EncoderRobot_init(&encoderTraslacion,  &htim3, 4000, 8.0f / 3.14159265f);
+    EncoderRobot_inicializar(&encoderInclinacion);
+    EncoderRobot_inicializar(&encoderTraslacion);
 
-void Robot_InitMotores(void) {
-    __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_2, 1500u);
-    __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_3, entero_pos(90.0f));
-    __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_4, entero_pos(0.0f));
-    __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_3, entero_pos(0.0f));
+    FinalDeCarrera_init(&limiteTraslacion_A, GPIOA, GPIO_PIN_9,  false);
+    FinalDeCarrera_init(&limiteTraslacion_B, GPIOA, GPIO_PIN_10, false);
+    FinalDeCarrera_init(&limiteInclinacion,  GPIOA, GPIO_PIN_8,  false);
 
-    HAL_TIM_PWM_Start(&htim5, TIM_CHANNEL_2);
-    HAL_TIM_PWM_Start(&htim5, TIM_CHANNEL_3);
-    HAL_TIM_PWM_Start(&htim5, TIM_CHANNEL_4);
-    HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);  // Motor inclinación
-    HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);  // Revólver
+    HAL_TIM_PWM_Start(&htim5, TIM_CHANNEL_2);   /* PA1  inclinación */
+    HAL_TIM_PWM_Start(&htim5, TIM_CHANNEL_3);   /* PA2  codo        */
+    HAL_TIM_PWM_Start(&htim5, TIM_CHANNEL_4);   /* PA3  muñeca      */
+    HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);   /* PE13 revólver    */
 
-    // Secuencia de centrado mecánico (bloqueante, solo en arranque)
-    float ang_codo_ini = 90.0f, ang_codo_fin = 45.0f;
-    float ang_muneca_ini = 0.0f, ang_muneca_fin = 90.0f;
-/*
-    __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_2, 2000u);
-    HAL_Delay(300);
-    __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_2, 1500u);
-    HAL_Delay(300);
-
-    set_servo_2(&htim5, entero_pos(ang_codo_ini));
-    set_servo_3(&htim5, entero_pos(ang_muneca_ini));
-    set_servo_3(&htim5, entero_pos(ang_muneca_fin));
-    set_servo_2(&htim5, entero_pos(ang_codo_fin));
-    set_servo_2(&htim5, entero_pos(ang_codo_ini));
-    set_servo_3(&htim5, entero_pos(ang_muneca_ini));
-
-    __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_2, 1500u);
-    HAL_Delay(1000);
-    */
+    HAL_GPIO_WritePin(STEP_PAP_GPIO_Port, STEP_PAP_Pin, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(DIR_PAP_GPIO_Port,  DIR_PAP_Pin,  GPIO_PIN_RESET);
+    stepper_reset_posicion();
 }
 
-void Robot_InitEncoders(void) {
-    EncoderRobot_inicializar(&encIzq);
-    EncoderRobot_inicializar(&encDer);
-    Homing_Iniciar();
+static void parar_todo_motores(void)
+{
+    motor1_set_velocidad(&htim5, 0);
+    pap_estado.pasos_restantes = 0;
 }
 
-// ── Encoders ──────────────────────────────────────────────────────────────────
+/* Seguridad no bloqueante: peligroObstaculo dura 500 ms sin HAL_Delay */
+static void Robot_VerificarLimites(void)
+{
+    static uint32_t t_peligro = 0;
 
-void Robot_ActualizarTelemetria(void) {
-    telemetria.distIzq = EncoderRobot_getDistanciaMM(&encIzq);
-    telemetria.distDer = EncoderRobot_getDistanciaMM(&encDer);
-    telemetria.angIzq  = EncoderRobot_getAnguloGrados(&encIzq);
-    telemetria.angDer  = EncoderRobot_getAnguloGrados(&encDer);
-}
-
-void Robot_TestEncoderManual(void) {
-    static float distAntIzq = 0.0f, distAntDer = 0.0f;
-
-    bool cambioIzq = fabsf(telemetria.distIzq - distAntIzq) > 1.0f;
-    bool cambioDer = fabsf(telemetria.distDer - distAntDer) > 1.0f;
-
-    if (cambioIzq || cambioDer) {
-        //printf("IZQ -> Dist: %.2f mm | Ang: %.2f deg\r\n", telemetria.distIzq, telemetria.angIzq);
-        //printf("DER -> Dist: %.2f mm | Ang: %.2f deg\r\n", telemetria.distDer, telemetria.angDer);
-        distAntIzq = telemetria.distIzq;
-        distAntDer = telemetria.distDer;
+    if (peligroObstaculo) {
+        if (HAL_GetTick() - t_peligro >= 500u) peligroObstaculo = false;
+        return;
     }
-}
 
-// ── Seguridad ─────────────────────────────────────────────────────────────────
+    bool tope = FinalDeCarrera_getFlag(&limiteTraslacion_A) ||
+                FinalDeCarrera_getFlag(&limiteTraslacion_B) ||
+                FinalDeCarrera_getFlag(&limiteInclinacion);
 
-void Robot_VerificarLimites(void) {
-    if (FinalDeCarrera_getFlag(&limiteTraslacion) || FinalDeCarrera_getFlag(&limiteInclinacion)) {
-        __HAL_TIM_SET_COMPARE(&htim5, TIM_CHANNEL_2, 1500u);
+    if (tope) {
         peligroObstaculo = true;
-        FinalDeCarrera_resetFlag(&limiteTraslacion);
+        t_peligro = HAL_GetTick();
+        parar_todo_motores();
+        FinalDeCarrera_resetFlag(&limiteTraslacion_A);
+        FinalDeCarrera_resetFlag(&limiteTraslacion_B);
         FinalDeCarrera_resetFlag(&limiteInclinacion);
     }
 }
 
-// ── Debug ─────────────────────────────────────────────────────────────────────
+/* Test rápido de articulaciones — bloqueante, se ejecuta una sola vez */
+static void test_rapido(void)
+{
+    set_servo_revolver(&htim1,  500u); HAL_Delay(500);
+    set_servo_revolver(&htim1, 1500u); HAL_Delay(500);
+    set_servo_revolver(&htim1, 2500u); HAL_Delay(500);
+    set_servo_revolver(&htim1,  500u); HAL_Delay(500);
 
-void Robot_DebugSistema(void) {
-/*    if (Homing_EstaActivo()) {
-        //static const char* nombres[] = {
-        //    "IDLE","TRASLACION","RETROCESO_T",
-        //    "INCLINACION","RETROCESO_I","COMPLETO","ERROR"
-        };
-        //printf("HOMING [%s]\r\n", nombres[Homing_GetEstado()]);
-        return;
-    }
-    if (peligroObstaculo) {
-        //printf("ALERTA! Final de carrera activado.\r\n");
-    } else {
-        //printf("IZQ:%.2f mm  DER:%.2f mm\r\n", telemetria.distIzq, telemetria.distDer);
-
-  }*/
-}
-// ── Bucle principal ───────────────────────────────────────────────────────────
-
-void Robot_Tick(void) {
-    //Homing_Tick();
-
-  //  if (!Homing_EstaCompleto()) return;
-
-    uint32_t tick = HAL_GetTick();
-
-    stepper_control_tick();
-
-    static uint32_t t_encoder = 0;
-    if (tick - t_encoder >= 10) {
-        t_encoder = tick;
-        Robot_ActualizarTelemetria();
-        Robot_TestEncoderManual();
-    }
-
-    static uint32_t t_debug = 0;
-    if (tick - t_debug >= 100) {
-        t_debug = tick;
-        Robot_DebugSistema();
-    }
-
-    Robot_VerificarLimites();
+    set_servo_2(&htim5, entero_pos(60.0f));
+    set_servo_3(&htim5, entero_pos(60.0f));  HAL_Delay(800);
+    set_servo_2(&htim5, entero_pos(120.0f));
+    set_servo_3(&htim5, entero_pos(120.0f)); HAL_Delay(800);
+    set_servo_2(&htim5, entero_pos(ANG_NEUTRO));
+    set_servo_3(&htim5, entero_pos(ANG_NEUTRO)); HAL_Delay(600);
 }
 
-// ── Interrupciones ────────────────────────────────────────────────────────────
+/* Rellena secuencia[] con las rayas a pintar.
+ * Lienzo 200×200 mm inclinado a 45°, 3 rayas horizontales.
+ * Para añadir más rayas o cambiar posiciones, edita solo esta función. */
+static void construir_secuencia(void)
+{
+    /* Alturas en el lienzo (mm) donde se pintará cada raya */
+    static const int16_t alturas[] = { 50, 100, 150 };
+    n_waypoints = 0;
 
-void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
-    if (GPIO_Pin == GPIO_PIN_4) {
-        EncoderRobot_registrarVueltaZ(&encIzq);
-    } else if (GPIO_Pin == GPIO_PIN_5) {
-        EncoderRobot_registrarVueltaZ(&encDer);
-    } else if (GPIO_Pin == GPIO_PIN_10) {
-        FinalDeCarrera_onInterrupcion(&limiteTraslacion);
-    } else if (GPIO_Pin == GPIO_PIN_11) {
+    for (int i = 0; i < 3; i++) {
+        c2d desde = { 0,   alturas[i] };   /* z=0 → inicio corredera  */
+        c2d hasta = { 200, alturas[i] };   /* z=200 → fin del lienzo  */
+
+        /* 1. Volar al inicio de la raya (sin contacto) */
+        secuencia[n_waypoints++] = (Waypoint){ plano_retroceso(desde), 0 };
+        /* 2. Apoyar el pincel en el lienzo */
+        secuencia[n_waypoints++] = (Waypoint){ plano_dibujo(desde),    1 };
+        /* 3. Trazar la raya de izquierda a derecha */
+        secuencia[n_waypoints++] = (Waypoint){ plano_dibujo(hasta),    2 };
+        /* 4. Retirar el pincel */
+        secuencia[n_waypoints++] = (Waypoint){ plano_retroceso(hasta), 3 };
+    }
+
+    /* Posición de reposo al terminar */
+    secuencia[n_waypoints++] = (Waypoint){ { SEPx, SEPy + 50, SEPz }, 0 };
+}
+
+/* ── Ciclo de vida: INIT → HOMING → TEST → SECUENCIA → LISTO ────────────── */
+static void Main_Tick(void)
+{
+    switch (estado_main) {
+
+    case MAIN_INIT:
+        estado_main = MAIN_HOMING;
+        break;
+
+    case MAIN_HOMING:
+        Homing_Tick();
+        if (Homing_EstaCompleto()) {
+            test_rapido();
+            construir_secuencia();
+            idx_wp = 0;
+            velocidad_reset();
+            estado_main = MAIN_POSICION_FINAL;
+        } else if (Homing_GetEstado() == HOMING_ERROR) {
+            parar_todo_motores();
+            estado_main = MAIN_ERROR;
+        }
+        break;
+
+    /* Ejecuta los waypoints de secuencia[] uno a uno */
+    case MAIN_POSICION_FINAL: {
+        Robot_VerificarLimites();
+        if (idx_wp >= n_waypoints) {
+            estado_main = MAIN_LISTO;
+            break;
+        }
+        uint8_t  flag = secuencia[idx_wp].flag;
+        motoresg sig;
+        if (trayectoria_cutre(&sig, secuencia[idx_wp].punto, &flag)) {
+            idx_wp++;
+            velocidad_reset();
+        } else {
+            control_loop_motores(sig);
+        }
+        break;
+    }
+
+    case MAIN_LISTO:
+        Robot_VerificarLimites();
+        /* secuencia completada — robot en reposo */
+        break;
+
+    case MAIN_ERROR:
+        parar_todo_motores();
+        break;
+
+    default:
+        estado_main = MAIN_INIT;
+        break;
+    }
+}
+
+/* ── Callbacks de interrupciones GPIO ───────────────────────────────────── */
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+    switch (GPIO_Pin) {
+    case GPIO_PIN_4:
+        EncoderRobot_registrarVueltaZ(&encoderInclinacion);
+        break;
+    case GPIO_PIN_5:
+        EncoderRobot_registrarVueltaZ(&encoderTraslacion);
+        break;
+    case GPIO_PIN_8:    /* PA8 — fin de carrera inclinación */
         FinalDeCarrera_onInterrupcion(&limiteInclinacion);
+        break;
+    case GPIO_PIN_9:    /* PA9 — fin de carrera traslación */
+        FinalDeCarrera_onInterrupcion(&limiteTraslacion_A);
+        break;
+    case GPIO_PIN_10:   /* PA10 — fin de carrera traslación */
+        FinalDeCarrera_onInterrupcion(&limiteTraslacion_B);
+        break;
+    default:
+        break;
     }
 }
-
 /* USER CODE END 4 */
 
 /**

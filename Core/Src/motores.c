@@ -8,8 +8,8 @@ static uint16_t ANGULO_REVOLVER = 0u;
 extern TIM_HandleTypeDef htim5;
 // CAMBIO: eliminado extern htim1 — ya no se usa
 extern bool peligroObstaculo;
-extern EncoderRobot encIzq;
-extern EncoderRobot encDer;
+extern EncoderRobot encoderInclinacion;
+extern EncoderRobot encoderTraslacion;
 
 static PID pid_base = {
     .Kp = 2.0f, .Ki = 0.5f, .Kd = 0.1f,
@@ -108,7 +108,7 @@ uint16_t get_servo_revolver(void) { return ANGULO_REVOLVER; }
 
 void reset_motores(TIM_HandleTypeDef *htim) {
     set_servo_2(htim, 1500u);
-    set_servo_3(htim, 500u);
+    set_servo_3(htim, 1500u);  /* neutral — 500u era extremo mecánico */
     set_servo_revolver(htim, 500u);
     motor1_set_velocidad(htim, 0);
 }
@@ -181,23 +181,23 @@ void stepper_reset_posicion(void) {
 
 // ── Lectura estado completo ───────────────────────────────────────────────────
 
-// CAMBIO: get_motoresg sin parámetros — usa globales encIzq/encDer
+// CAMBIO: get_motoresg sin parámetros — usa globales encoderInclinacion/encoderTraslacion
 // CAMBIO: m.base ahora es getDistanciaMM (mm), no ángulo
-// CAMBIO: m.r1 es ángulo de inclinación desde encDer
+// CAMBIO: m.r1 es ángulo de inclinación desde encoderTraslacion
 motoresg get_motoresg(void) {
     motoresg m;
-    m.base = EncoderRobot_getDistanciaMM(&encDer);  // mm de traslación
-    m.r1   = EncoderRobot_getAnguloGrados(&encIzq); // grados inclinación
+    m.base = EncoderRobot_getDistanciaMM(&encoderTraslacion);  // mm de traslación
+    m.r1   = EncoderRobot_getAnguloGrados(&encoderInclinacion); // grados inclinación
     m.r2   = grados_pos(get_servo_2());              // grados codo
     m.r3   = grados_pos(get_servo_3());              // grados muñeca
     return m;
 }
 
-// CAMBIO: set_motores usa htim5 en vez de htim1
 bool set_motores(motoresg m) {
-    motor1_set_velocidad(&htim5, (int16_t)m.r1);
-    set_servo_2(&htim5, entero_pos(m.r2));           // CAMBIO: htim1 → htim5
-    set_servo_3(&htim5, entero_pos(m.r3));           // CAMBIO: htim1 → htim5
+    motor1_pid_tick(&encoderInclinacion, m.r1);
+    set_servo_2(&htim5, entero_pos(m.r2));
+    set_servo_3(&htim5, entero_pos(m.r3));
+    stepper_mover_a_mm(m.base, 3);
     return false;
 }
 
@@ -206,11 +206,13 @@ bool set_motores(motoresg m) {
 float pid_funcion(PID *pid, float error) {
     if (fabsf(error) < pid->zonamuerta) return 0.0f;
 
-    pid->integral += error * DT_CONTROL;
+    float dt = (pid->dt > 0.0f) ? pid->dt : DT_CONTROL;
+
+    pid->integral += error * dt;
     if (pid->integral >  pid->vmax) pid->integral =  pid->vmax;
     if (pid->integral < -pid->vmax) pid->integral = -pid->vmax;
 
-    float derivada = (error - pid->prev_error) / DT_CONTROL;
+    float derivada = (error - pid->prev_error) / dt;
     pid->prev_error = error;
 
     float u = pid->Kp * error + pid->Ki * pid->integral + pid->Kd * derivada;
@@ -222,37 +224,50 @@ float pid_funcion(PID *pid, float error) {
 void control_loop_motores(motoresg objetivo) {
     if (peligroObstaculo) { motor1_parar(); return; }
 
-    // Traslación: PID sobre distancia en mm
-    float base_actual = EncoderRobot_getDistanciaMM(&encDer); // CAMBIO
-    float e_base = objetivo.base - base_actual;
-    float u_base = pid_funcion(&pid_base, e_base);
+    /* Medir dt real para que los PIDs trabajen con el tiempo correcto */
+    static uint32_t t_prev = 0;
+    uint32_t ahora = HAL_GetTick();
+    float dt = (t_prev == 0) ? DT_CONTROL : (float)(ahora - t_prev) * 0.001f;
+    if (dt < 0.001f || dt > 0.1f) dt = DT_CONTROL;
+    t_prev = ahora;
+    pid_base.dt = dt;
+    pid_r1.dt   = dt;
 
-    if (fabsf(u_base) > 0.1f && !stepper_en_movimiento()) {
+    /* Traslación: PID sobre distancia en mm */
+    float base_actual = EncoderRobot_getDistanciaMM(&encoderTraslacion);
+    float e_base      = objetivo.base - base_actual;
+    float u_base      = pid_funcion(&pid_base, e_base);
+
+    if (fabsf(e_base) < 1.0f) {
+        /* dentro de tolerancia: cancelar movimiento pendiente */
+        pap_estado.pasos_restantes = 0;
+    } else if (!stepper_en_movimiento() && fabsf(u_base) > 0.1f) {
         uint16_t intervalo = (uint16_t)(1000.0f / (fabsf(u_base) * PASOS_POR_MM));
-        if (intervalo < 1) intervalo = 1;
-        stepper_mover_mm(e_base > 0 ? MM_POR_PASO : -MM_POR_PASO, intervalo);
+        if (intervalo < 2)   intervalo = 2;    /* vel. máx ~20 mm/s   */
+        if (intervalo > 100) intervalo = 100;  /* vel. mín ~0.4 mm/s  */
+        float delta = e_base;
+        if (delta >  5.0f) delta =  5.0f;     /* máx 5 mm por ciclo PID */
+        if (delta < -5.0f) delta = -5.0f;
+        stepper_mover_mm(delta, intervalo);
     }
-    if (fabsf(e_base) < 1.0f) { pap_estado.pasos_restantes = 0;  }
 
-    // Inclinación: PID con encoder
-
-    //si el freno esta activo y el objetivo no corresponde con el encoder lo apaga
-    if (freno_R1_activo && fabsf(objetivo.r1 - freno_R1_objetivo) > 1.0f) freno_R1_activo=false;
+    /* Inclinación: freno activo cuando llega al objetivo, PID mientras viaja */
+    if (freno_R1_activo && fabsf(objetivo.r1 - freno_R1_objetivo) > 1.0f) freno_R1_activo = false;
     if (!freno_R1_activo && r1_llega(objetivo.r1)) {
-    	freno_R1_objetivo = objetivo.r1;
-    	freno_R1_activo = true;
+        freno_R1_objetivo = objetivo.r1;
+        freno_R1_activo   = true;
     }
-    if (freno_R1_activo) { freno_R1(freno_R1_objetivo);}
-    else motor1_pid_tick(&encIzq, objetivo.r1);
+    if (freno_R1_activo) { freno_R1(freno_R1_objetivo); }
+    else                 { motor1_pid_tick(&encoderInclinacion, objetivo.r1); }
 
-    // Servos posicionales: directo a posición en htim5
+    /* Servos posicionales: directo a posición — no tocar, funcionan bien */
     set_servo_2_grados(&htim5, objetivo.r2);
     set_servo_3_grados(&htim5, objetivo.r3);
 }
 
 bool r1_llega(float objetivo_r1)
 {
-    float actual = EncoderRobot_getAnguloGrados(&encDer);
+    float actual = EncoderRobot_getAnguloGrados(&encoderInclinacion);
     float tol = 2.0f; // tolerancia en grados
 
     return fabsf(actual - objetivo_r1) < tol;
@@ -260,34 +275,21 @@ bool r1_llega(float objetivo_r1)
 
 void freno_R1(float objetivo)
 {
-	freno_R1_activo=true;
-	freno_R1_objetivo=objetivo;
-    float actual = EncoderRobot_getAnguloGrados(&encDer);
-    float error = objetivo - actual;
+    freno_R1_activo   = true;
+    freno_R1_objetivo = objetivo;
+    float actual = EncoderRobot_getAnguloGrados(&encoderInclinacion);
+    float error  = objetivo - actual;
 
-    const float zona_muerta = 2.0f;   // no corregir si esta cerca
-    const float zona_freno  = 5.0f;  // solo corregir si se va MUCHO
-
-    // Dentro de la zona muertA, no vibrar
-    if (fabsf(error) < zona_muerta) {
+    if (fabsf(error) < 1.0f) {
         motor1_set_velocidad(&htim5, 0);
         pid_r1.integral = 0;
         return;
     }
 
-    // Si se va un poco, NO corregir
-    if (fabsf(error) < zona_freno) {
-        motor1_set_velocidad(&htim5, 0);
-        return;
-    }
-
-    // Si se va mucho, corregir suave
     float u = pid_funcion(&pid_r1, error);
-
-    if (u > 25) u = 25;
-    if (u < -25) u = -25;
-
-    motor1_set_velocidad(&htim5, (int8_t)u);
+    if (u >  20.0f) u =  20.0f;
+    if (u < -20.0f) u = -20.0f;
+    motor1_set_velocidad(&htim5, (int16_t)u);
 }
 
 

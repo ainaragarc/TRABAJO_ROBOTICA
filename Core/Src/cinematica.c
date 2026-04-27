@@ -35,7 +35,22 @@ bool dentro_rango(c3d cor) {
     return true;
 }
 
-// ── 1. Paso de coordenadas a plano ───────────────────────────────────────────
+// ── 1. Convergencia y estado de velocidades ──────────────────────────────────
+
+bool objetivo_alcanzado(c3d act, c3d obj, float tol_mm) {
+    float dx = (float)(act.x - obj.x);
+    float dy = (float)(act.y - obj.y);
+    float dz = (float)(act.z - obj.z);
+    return (dx*dx + dy*dy + dz*dz) <= (tol_mm * tol_mm);
+}
+
+void velocidad_reset(void) {
+    vx_prev = 0.0f;
+    vy_prev = 0.0f;
+    vz_prev = 0.0f;
+}
+
+// ── 2. Paso de coordenadas a plano ───────────────────────────────────────────
 
 c3d plano_dibujo(c2d cor) {
     c3d vuelta;
@@ -49,7 +64,7 @@ c3d plano_dibujo(c2d cor) {
     return vuelta;
 }
 
-c3d plano_no_dibujo(c2d cor) {
+c3d plano_retroceso(c2d cor) {
     c3d vuelta;
     if (cor.z < 0)    cor.z = SEPz;
     if (cor.y < 0)    cor.y = SEPy;
@@ -61,7 +76,7 @@ c3d plano_no_dibujo(c2d cor) {
     return vuelta;
 }
 
-// ── 2. Cinemática directa ─────────────────────────────────────────────────────
+// ── 3. Cinemática directa ─────────────────────────────────────────────────────
 // CAMBIO: recibe motoresg donde base es mm (no grados)
 // CAMBIO: vuelta.coor.z = m.base directamente (ya está en mm)
 
@@ -82,7 +97,7 @@ c4d cinematica_directa(motoresg m) {
     return vuelta;
 }
 
-// ── 3. Cinemática inversa ─────────────────────────────────────────────────────
+// ── 4. Cinemática inversa ─────────────────────────────────────────────────────
 // CAMBIO: mot.base = cor.z directamente en mm (no convertir a grados)
 
 motoresg cinematica_inversa(c3d cor) {
@@ -91,9 +106,12 @@ motoresg cinematica_inversa(c3d cor) {
     // CAMBIO: base en mm directamente
     mot.base = (float)cor.z;
 
-    float x  = cor.x - L3;
-    float y  = cor.y;
-    float t2 = -acosf((x*x + y*y - L1*L1 - L2*L2) / (2.0f * L1 * L2));
+    float x    = cor.x - L3;
+    float y    = cor.y;
+    float arg2 = (x*x + y*y - L1*L1 - L2*L2) / (2.0f * L1 * L2);
+    if (arg2 >  1.0f) arg2 =  1.0f;
+    if (arg2 < -1.0f) arg2 = -1.0f;
+    float t2 = -acosf(arg2);
     float t1 = atan2f(y, x) - atan2f(L2*sinf(t2), L1 + L2*cosf(t2));
     float t3 = -(t1 + t2);
 
@@ -104,7 +122,7 @@ motoresg cinematica_inversa(c3d cor) {
     return mot;
 }
 
-// ── 4. Jacobiano ─────────────────────────────────────────────────────────────
+// ── 5. Jacobiano ─────────────────────────────────────────────────────────────
 
 jcb2 jacobiana(float t1, float t2) {
     jcb2 J;
@@ -142,7 +160,7 @@ void jacobiana_siguiente(float t1, float t2, float xd, float yd,
     *t3d = -(*t1d + *t2d);
 }
 
-// ── 5. Velocidades ────────────────────────────────────────────────────────────
+// ── 6. Velocidades ────────────────────────────────────────────────────────────
 
 void velocidad_dibujo_recta(c3d act, c3d objetivo, c3d *velocidades) {
     float dx   = (float)(objetivo.x - act.x);
@@ -220,14 +238,14 @@ void velocidad_transicion(c3d act, c3d obj, c3d *velocidades, uint8_t flag) {
     if (act.x == obj.x) velocidades->x = 0;
 }
 
-// ── 6. Trayectoria jacobiana ──────────────────────────────────────────────────
+// ── 7. Trayectoria jacobiana ──────────────────────────────────────────────────
 
 bool trayectoria(motoresg *salida, c3d obj, uint8_t *flagdibujo) {
     motores_actualesg = get_motoresg();
     c4d act = cinematica_directa(motores_actualesg);
 
-    if (act.coor.x == obj.x && act.coor.y == obj.y && act.coor.z == obj.z) {
-        vx_prev = 0; vy_prev = 0; vz_prev = 0;
+    if (objetivo_alcanzado(act.coor, obj, TOLERANCIA_MM)) {
+        velocidad_reset();
         *salida = motores_actualesg;
         return true;
     }
@@ -241,6 +259,7 @@ bool trayectoria(motoresg *salida, c3d obj, uint8_t *flagdibujo) {
         default: velocidades.x = 0; velocidades.y = 0; velocidades.z = 0;       break;
     }
 
+    /* t_fk = -R_grados * π/180 — convención FK interna */
     float t1 = radianes(-motores_actualesg.r1);
     float t2 = radianes(-motores_actualesg.r2);
     float t3 = radianes(-motores_actualesg.r3);
@@ -252,27 +271,27 @@ bool trayectoria(motoresg *salida, c3d obj, uint8_t *flagdibujo) {
     t2 += t2dot * DT_CONTROL;
     t3 += t3dot * DT_CONTROL;
 
+    /* Inversión del mapeo FK: R = -grados(t_fk) */
     motoresg vuelta = motores_actualesg;
-    vuelta.r1 = restriccion_angulos(grados(t1));
-    vuelta.r2 = restriccion_angulos(grados(t2));
-    vuelta.r3 = restriccion_angulos(grados(t3));
+    vuelta.r1 = restriccion_angulos(-grados(t1));
+    vuelta.r2 = restriccion_angulos(-grados(t2));
+    vuelta.r3 = restriccion_angulos(-grados(t3));
 
-    // CAMBIO: base en mm directamente (no convertir a grados)
-    float z_actual = act.coor.z;
-    vuelta.base = z_actual + velocidades.z * DT_CONTROL;
+    /* Base en mm: usar el float almacenado, no el int16_t de la FK */
+    vuelta.base = motores_actualesg.base + (float)velocidades.z * DT_CONTROL;
 
     *salida = vuelta;
     return false;
 }
 
-// ── 7. Trayectoria Bresenham ──────────────────────────────────────────────────
+// ── 8. Trayectoria Bresenham ──────────────────────────────────────────────────
 
 bool trayectoria_cutre(motoresg *salida, c3d obj, uint8_t *flagdibujo) {
     motores_actualesg = get_motoresg();
     c4d act4 = cinematica_directa(motores_actualesg);
     c3d act  = act4.coor;
 
-    if (act.x == obj.x && act.y == obj.y && act.z == obj.z) {
+    if (objetivo_alcanzado(act, obj, TOLERANCIA_MM)) {
         *salida = motores_actualesg;
         return true;
     }
