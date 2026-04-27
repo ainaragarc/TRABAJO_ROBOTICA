@@ -78,6 +78,11 @@ TIM_HandleTypeDef htim4;
 // Velocidad mínima deseada: 1 cm/s = 10 mm/s
 #define MIN_SPEED_MM_S          10.0f
 
+
+//-------------------------Encoder R1-----------------------------
+#define ENCODER_CPR 1440.0f
+//----------------------------------------------------------------
+
 //-----------------------------------------------------------------------
 
 /* USER CODE END PV */
@@ -194,6 +199,43 @@ static void Stepper_StopFree(void)
 
 //-----------------------------------------------------------------------
 
+//-------------CODIGO MOTOR 1----------------------
+
+void R1_SetVelocity(uint16_t vel)
+{
+	if (vel >= 2000) vel = 2000;
+	if (vel <= 1000) vel = 1000;
+    __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, vel);
+}
+
+void R1_Quieto(){
+	R1_SetVelocity(1500);
+}
+
+//-----------------------------------------------------
+
+//-------------------Código Encoder Motor 1 -----------------------------------
+volatile float resultado = 0;
+
+int32_t Encoder_Get(void)
+{
+    return (int32_t)__HAL_TIM_GET_COUNTER(&htim2);
+}
+
+float Encoder_GetDegrees(void)
+{
+    int32_t count = __HAL_TIM_GET_COUNTER(&htim2);
+    resultado = (count * 360.0f) / ENCODER_CPR;
+
+    return resultado;
+}
+void Encoder_Reset(void) //esta función sirve para setear el 0 del encoder donde queramos que al ser incremental lo podemos poner dnd queramos. --> Se necesitará un homing supongo
+{
+    __HAL_TIM_SET_COUNTER(&htim2, 0);
+}
+
+//------------------------------------------------------------------------------
+
 /* USER CODE END 0 */
 
 /**
@@ -229,6 +271,8 @@ int main(void)
   MX_TIM2_Init();
   MX_TIM3_Init();
   MX_TIM4_Init();
+
+  HAL_TIM_Encoder_Start(&htim2, TIM_CHANNEL_ALL);
   /* USER CODE BEGIN 2 */
 
   //-----------------------------stepper------------------------------------------
@@ -238,6 +282,10 @@ int main(void)
 
   Stepper_Enable();
 
+
+  // --------------------------encoder R1------------------------------------
+  Encoder_Reset();
+  //-------------------------------------------------------------------------
 
 //---------------------------------------------------------------------------------
 
@@ -252,7 +300,11 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
 
-	  // Sentido 1: 20 mm/s durante 3 segundos
+
+	  Encoder_GetDegrees();
+
+
+	  /*  // Sentido 1: 20 mm/s durante 3 segundos
 	     Stepper_StartMmS(40.0f, 1);
 	     HAL_Delay(2000);
 
@@ -266,87 +318,18 @@ int main(void)
 	     Stepper_StopHold();
 	     HAL_Delay(1000);
 
-/*
-	  // Parado / neutro
-	     Servo_WriteUs(1500);
-	     HAL_Delay(2000);
+	  // Prueba movimientos R1
 
-	     // Máximo sentido 1
-	     Servo_WriteUs(2500);
-	     HAL_Delay(3000);
+	     R1_SetVelocity(1500);
+	     HAL_Delay(1000);
+	     R1_SetVelocity(2000);
+	     HAL_Delay(500);
+	     R1_SetVelocity(1500);
+	     HAL_Delay(1000);
+	     R1_SetVelocity(1000);
+	     HAL_Delay(500);
 
-	     // Parado / neutro
-	     Servo_WriteUs(1500);
-	     HAL_Delay(2000);
-
-	     // Máximo sentido 2
-	     Servo_WriteUs(500);
-	     HAL_Delay(3000);
-	  //HAL_Delay(50);
-*/
-/*
-//---------------PRUEBA MOTOR PASO A PASO--------------------
-
-	  uint8_t btn1 = (HAL_GPIO_ReadPin(GPIOB, Paso_dcha_Pin) == GPIO_PIN_RESET);
-	  uint8_t btn2 = (HAL_GPIO_ReadPin(GPIOB, Paso_Izq_Pin) == GPIO_PIN_RESET);
-
-	  if (btn1 && !btn2)
-	  {
-	    if (lastDir != -1)
-	    {
-	      HAL_GPIO_WritePin(GPIOB, DIR_Pin, GPIO_PIN_RESET);
-	      delay_us(2000);        // pequeña pausa al cambiar de sentido
-	      stepLowUs = 2500;
-	      accelCount = 0;
-	      lastDir = -1;
-	    }
-
-	    HAL_GPIO_WritePin(GPIOB, STEP_Pin, GPIO_PIN_SET);
-	    delay_us(20);            // pulso alto amplio
-	    HAL_GPIO_WritePin(GPIOB, STEP_Pin, GPIO_PIN_RESET);
-	    delay_us(stepLowUs);
-
-	    accelCount++;
-	    if (accelCount >= 25 && stepLowUs > 800)
-	    {
-	      stepLowUs -= 50;       // acelera poco a poco
-	      accelCount = 0;
-	    }
-	  }
-	  else if (btn2 && !btn1)
-	  {
-	    if (lastDir != 1)
-	    {
-	      HAL_GPIO_WritePin(GPIOB, DIR_Pin, GPIO_PIN_SET);
-	      delay_us(2000);
-	      stepLowUs = 2500;
-	      accelCount = 0;
-	      lastDir = 1;
-	    }
-
-	    HAL_GPIO_WritePin(GPIOB, STEP_Pin, GPIO_PIN_SET);
-	    delay_us(20);
-	    HAL_GPIO_WritePin(GPIOB, STEP_Pin, GPIO_PIN_RESET);
-	    delay_us(stepLowUs);
-
-	    accelCount++;
-	    if (accelCount >= 25 && stepLowUs > 800)
-	    {
-	      stepLowUs -= 50;
-	      accelCount = 0;
-	    }
-	  }
-	  else
-	  {
-	    HAL_GPIO_WritePin(GPIOB, STEP_Pin, GPIO_PIN_RESET);
-	    stepLowUs = 2500;
-	    accelCount = 0;
-	    lastDir = 0;
-	  }
-//----------------------------------------------------------------
-*/
-
-
+	  */
 
   }
   /* USER CODE END 3 */
@@ -505,7 +488,7 @@ static void MX_TIM2_Init(void)
   htim2.Init.Period = 4294967295;
   htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
-  sConfig.EncoderMode = TIM_ENCODERMODE_TI1;
+  sConfig.EncoderMode = TIM_ENCODERMODE_TI12;
   sConfig.IC1Polarity = TIM_ICPOLARITY_RISING;
   sConfig.IC1Selection = TIM_ICSELECTION_DIRECTTI;
   sConfig.IC1Prescaler = TIM_ICPSC_DIV1;
