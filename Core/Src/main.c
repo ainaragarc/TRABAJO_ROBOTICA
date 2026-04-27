@@ -47,14 +47,29 @@ TIM_HandleTypeDef htim2;
 
 /* USER CODE BEGIN PV */
 
-#define ENC_COUNTS_PER_REV       4096.0f
+volatile int32_t dbg_encoder_count = 0;
+volatile float dbg_angle_deg = 0.0f;
+volatile float dbg_delta_deg = 0.0f;
+volatile uint32_t dbg_tim2_raw = 0;
+
+volatile float dbg_target_final_deg = 0.0f;
+volatile float dbg_target_ramped_deg = 0.0f;
+volatile float dbg_error_deg = 0.0f;
+volatile float dbg_velocity_dps = 0.0f;
+volatile float dbg_control_u = 0.0f;
+volatile int dbg_pulse_us = 1500;
+volatile int dbg_state = 0;
+
+
+
+#define ENC_COUNTS_PER_REV       2048.0f
 #define ENCODER_DIRECTION        1.0f
 #define SERVO_DIRECTION          1.0f
 
 #define SERVO_NEUTRAL_US         1500
 #define SERVO_MIN_US             1000
 #define SERVO_MAX_US             2000
-#define SERVO_MAX_OFFSET_US      300
+#define SERVO_MAX_OFFSET_US      200
 
 #define ANGLE_START_DEG          90.0f
 #define ANGLE_CENTER_DEG         90.0f
@@ -67,9 +82,9 @@ TIM_HandleTypeDef htim2;
 #define TARGET_SPEED_DPS         35.0f
 #define CONTROL_PERIOD_MS        10
 
-static float KP = 8.0f;
-static float KI = 1.5f;
-static float KD = 0.35f;
+static float KP = 4.0f;
+static float KI = 0.0f;
+static float KD = 0.2f;
 
 #define INTEGRAL_LIMIT           120.0f
 
@@ -111,6 +126,20 @@ static void MX_TIM2_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+static void Debug_UpdateEncoder(void)
+{
+    dbg_tim2_raw = __HAL_TIM_GET_COUNTER(&htim2);
+
+    dbg_encoder_count = (int32_t)dbg_tim2_raw;
+
+    dbg_delta_deg = ((float)dbg_encoder_count / ENC_COUNTS_PER_REV) * 360.0f * ENCODER_DIRECTION;
+
+    dbg_angle_deg = ANGLE_START_DEG + dbg_delta_deg;
+}
+
+
+
 
 static float clamp_float(float x, float min, float max)
 {
@@ -327,6 +356,15 @@ static void ControlLoop_Update(void)
 
     u = clamp_float(u, -SERVO_MAX_OFFSET_US, SERVO_MAX_OFFSET_US);
 
+    dbg_target_final_deg = target_final_deg;
+    dbg_target_ramped_deg = target_ramped_deg;
+    dbg_error_deg = error_deg;
+    dbg_velocity_dps = velocity_dps;
+    dbg_control_u = u;
+    dbg_state = (int)state;
+
+
+
     if ((angle_deg <= ANGLE_MIN_DEG) && (u < 0.0f))
     {
         u = 0.0f;
@@ -342,6 +380,8 @@ static void ControlLoop_Update(void)
     int pulse_us = SERVO_NEUTRAL_US + (int)(SERVO_DIRECTION * u);
 
     pulse_us = clamp_int(pulse_us, SERVO_MIN_US, SERVO_MAX_US);
+
+    dbg_pulse_us = pulse_us;
 
     Servo_WriteUs((uint16_t)pulse_us);
 }
@@ -416,6 +456,7 @@ int main(void)
   __HAL_TIM_MOE_ENABLE(&htim1);
 
   HAL_TIM_Encoder_Start(&htim2, TIM_CHANNEL_ALL);
+  __HAL_TIM_SET_COUNTER(&htim2, 0);
 
   /*
      Antes de arrancar:
@@ -443,6 +484,25 @@ int main(void)
 
 	  ControlLoop_Update();
 
+	  Debug_UpdateEncoder();
+/*
+	  // Parado / neutro
+	     Servo_WriteUs(1500);
+	     HAL_Delay(2000);
+
+	     // Máximo sentido 1
+	     Servo_WriteUs(2500);
+	     HAL_Delay(3000);
+
+	     // Parado / neutro
+	     Servo_WriteUs(1500);
+	     HAL_Delay(2000);
+
+	     // Máximo sentido 2
+	     Servo_WriteUs(500);
+	     HAL_Delay(3000);
+	  //HAL_Delay(50);
+*/
 /*
 //---------------PRUEBA MOTOR PASO A PASO--------------------
 
