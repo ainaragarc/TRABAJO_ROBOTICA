@@ -32,8 +32,8 @@ EstadoMotorRotacional motor1_estado = {0};
 
 void motor1_set_velocidad(TIM_HandleTypeDef *htim, int16_t velocidad) {
     int32_t us = 1500 + (velocidad * 5);
-    if (us < 1000) us = 1000;
-    if (us > 2000) us = 2000;
+    if (us < 500) us = 500;
+    if (us > 2500) us = 2500;
     __HAL_TIM_SET_COMPARE(htim, TIM_CHANNEL_2, (uint32_t)us);
 }
 

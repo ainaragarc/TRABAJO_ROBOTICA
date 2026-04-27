@@ -89,7 +89,8 @@ int main(void)
   Robot_InitEncoders();
 
   // Test motor inclinación — velocidades corregidas a rango válido (-100 a 100)
-  motor1_mover_grados_estimados(&htim5, 90.0f, 50);
+
+  /*motor1_mover_grados_estimados(&htim5, 90.0f, 50);
   HAL_Delay(2000);
   motor1_mover_grados_estimados(&htim5, -90.0f, 50);
   HAL_Delay(2000);
@@ -100,11 +101,21 @@ int main(void)
   motor1_set_velocidad(&htim5, 50);
   HAL_Delay(2000);
   motor1_set_velocidad(&htim5, 0);
+  */
+
   /* USER CODE END 2 */
 
   while (1)
   {
-    Robot_Tick();
+    //Robot_Tick();
+	motor1_set_velocidad(&htim5, 0);
+	HAL_Delay(1000);
+	motor1_set_velocidad(&htim5, 2000);
+	HAL_Delay(500);
+	motor1_set_velocidad(&htim5, 0);
+	HAL_Delay(1000);
+	motor1_set_velocidad(&htim5, -2000);
+	HAL_Delay(500);
   }
 }
 
