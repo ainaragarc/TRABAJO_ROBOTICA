@@ -47,10 +47,17 @@ TIM_HandleTypeDef htim2;
 
 /* USER CODE BEGIN PV */
 
-volatile int32_t dbg_encoder_count = 0;
-volatile float dbg_angle_deg = 0.0f;
-volatile float dbg_delta_deg = 0.0f;
+volatile uint32_t dbg_tick_ms = 0;
+volatile uint32_t dbg_loop_counter = 0;
+
 volatile uint32_t dbg_tim2_raw = 0;
+volatile int32_t dbg_encoder_count = 0;
+volatile float dbg_delta_deg = 0.0f;
+volatile float dbg_angle_deg = 0.0f;
+
+volatile uint32_t dbg_tim2_cr1 = 0;
+volatile uint32_t dbg_tim2_smcr = 0;
+volatile uint32_t dbg_tim2_ccer = 0;
 
 volatile float dbg_target_final_deg = 0.0f;
 volatile float dbg_target_ramped_deg = 0.0f;
@@ -138,10 +145,13 @@ static void Debug_UpdateEncoder(void)
     dbg_delta_deg = ((float)dbg_encoder_count / ENC_COUNTS_PER_REV) * 360.0f * ENCODER_DIRECTION;
     dbg_angle_deg = ANGLE_START_DEG + dbg_delta_deg;
 
-    // Registros internos del TIM2 para ver si sigue activo
-    dbg_tim2_cr1 = TIM2->CR1;
-    dbg_tim2_smcr = TIM2->SMCR;
-    dbg_tim2_ccer = TIM2->CCER;
+    dbg_tim2_cr1  = htim2.Instance->CR1;
+    dbg_tim2_smcr = htim2.Instance->SMCR;
+    dbg_tim2_ccer = htim2.Instance->CCER;
+
+    dbg_target_final_deg = target_final_deg;
+    dbg_target_ramped_deg = target_ramped_deg;
+    dbg_state = (int)state;
 }
 
 
