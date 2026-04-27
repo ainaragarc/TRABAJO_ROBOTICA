@@ -129,15 +129,26 @@ static void MX_TIM2_Init(void);
 
 static void Debug_UpdateEncoder(void)
 {
-    dbg_tim2_raw = __HAL_TIM_GET_COUNTER(&htim2);
+    static uint32_t last_dbg_ms = 0;
+    uint32_t now = HAL_GetTick();
 
+    if (now - last_dbg_ms < 50)
+    {
+        return;
+    }
+
+    last_dbg_ms = now;
+
+    dbg_tim2_raw = __HAL_TIM_GET_COUNTER(&htim2);
     dbg_encoder_count = (int32_t)dbg_tim2_raw;
 
     dbg_delta_deg = ((float)dbg_encoder_count / ENC_COUNTS_PER_REV) * 360.0f * ENCODER_DIRECTION;
-
     dbg_angle_deg = ANGLE_START_DEG + dbg_delta_deg;
-}
 
+    dbg_target_final_deg = target_final_deg;
+    dbg_target_ramped_deg = target_ramped_deg;
+    dbg_state = (int)state;
+}
 
 
 
