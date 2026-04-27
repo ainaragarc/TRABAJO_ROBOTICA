@@ -21,7 +21,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "motores.h"
+
 #include <math.h>
 
 /* USER CODE END Includes */
@@ -44,81 +44,41 @@
 /* Private variables ---------------------------------------------------------*/
 TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim2;
+TIM_HandleTypeDef htim3;
+TIM_HandleTypeDef htim4;
 
 /* USER CODE BEGIN PV */
 
-volatile uint32_t dbg_tick_ms = 0;
-volatile uint32_t dbg_loop_counter = 0;
+//------------------stepper-------------------------------------------
 
-volatile uint32_t dbg_tim2_raw = 0;
-volatile int32_t dbg_encoder_count = 0;
-volatile float dbg_delta_deg = 0.0f;
-volatile float dbg_angle_deg = 0.0f;
+#define STEP_TIM                htim4
+#define STEP_TIM_CHANNEL        TIM_CHANNEL_1
 
-volatile uint32_t dbg_tim2_cr1 = 0;
-volatile uint32_t dbg_tim2_smcr = 0;
-volatile uint32_t dbg_tim2_ccer = 0;
+#define STEP_DIR_PORT           GPIOB
+#define STEP_DIR_PIN            GPIO_PIN_7
 
-volatile float dbg_target_final_deg = 0.0f;
-volatile float dbg_target_ramped_deg = 0.0f;
-volatile float dbg_error_deg = 0.0f;
-volatile float dbg_velocity_dps = 0.0f;
-volatile float dbg_control_u = 0.0f;
-volatile int dbg_pulse_us = 1500;
-volatile int dbg_state = 0;
+#define STEP_EN_PORT            GPIOB
+#define STEP_EN_PIN             GPIO_PIN_8
 
+#define DIR_POSITIVE            GPIO_PIN_SET
+#define DIR_NEGATIVE            GPIO_PIN_RESET
 
+// TIM4 está en APB1. Con tu clock: APB1 timer clock = 50 MHz.
+// Prescaler = 49 -> tick de 1 MHz -> 1 us.
+#define STEP_TIMER_TICK_HZ      1000000UL
 
-#define ENC_COUNTS_PER_REV       2048.0f
-#define ENCODER_DIRECTION        1.0f
-#define SERVO_DIRECTION          1.0f
+// Mecánica
+#define STEPS_PER_REV           200.0f
+#define MM_PER_REV              8.0f
+#define STEPS_PER_MM            (STEPS_PER_REV / MM_PER_REV)   // 25 pasos/mm
 
-#define SERVO_NEUTRAL_US         1500
-#define SERVO_MIN_US             1000
-#define SERVO_MAX_US             2000
-#define SERVO_MAX_OFFSET_US      200
+// Corredera
+#define SLIDER_LENGTH_MM        440.0f
 
-#define ANGLE_START_DEG          90.0f
-#define ANGLE_CENTER_DEG         90.0f
-#define ANGLE_MIN_DEG            50.0f
-#define ANGLE_MAX_DEG            130.0f
+// Velocidad mínima deseada: 1 cm/s = 10 mm/s
+#define MIN_SPEED_MM_S          10.0f
 
-#define ANGLE_FRONT_DEG          130.0f
-#define ANGLE_BACK_DEG           50.0f
-
-#define TARGET_SPEED_DPS         35.0f
-#define CONTROL_PERIOD_MS        10
-
-static float KP = 4.0f;
-static float KI = 0.0f;
-static float KD = 0.2f;
-
-#define INTEGRAL_LIMIT           120.0f
-
-static float target_final_deg = ANGLE_CENTER_DEG;
-static float target_ramped_deg = ANGLE_CENTER_DEG;
-
-static float pid_integral = 0.0f;
-static float prev_angle_deg = ANGLE_CENTER_DEG;
-
-static uint32_t last_control_ms = 0;
-static uint32_t state_start_ms = 0;
-
-typedef enum
-{
-    ST_HOLD_CENTER_START = 0,
-    ST_MOVE_FRONT,
-    ST_HOLD_FRONT,
-    ST_MOVE_CENTER_1,
-    ST_HOLD_CENTER_1,
-    ST_MOVE_BACK,
-    ST_HOLD_BACK,
-    ST_MOVE_CENTER_2,
-    ST_HOLD_CENTER_2
-} MotionState;
-
-static MotionState state = ST_HOLD_CENTER_START;
-
+//-----------------------------------------------------------------------
 
 /* USER CODE END PV */
 
@@ -127,6 +87,8 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_TIM1_Init(void);
 static void MX_TIM2_Init(void);
+static void MX_TIM3_Init(void);
+static void MX_TIM4_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -134,288 +96,103 @@ static void MX_TIM2_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
-static void Debug_UpdateEncoder(void)
+//-----------------------------stepper------------------------------------------
+
+static void Stepper_Enable(void)
 {
-    dbg_loop_counter++;
-    dbg_tick_ms = HAL_GetTick();
-
-    dbg_tim2_raw = __HAL_TIM_GET_COUNTER(&htim2);
-    dbg_encoder_count = (int32_t)dbg_tim2_raw;
-
-    dbg_delta_deg = ((float)dbg_encoder_count / ENC_COUNTS_PER_REV) * 360.0f * ENCODER_DIRECTION;
-    dbg_angle_deg = ANGLE_START_DEG + dbg_delta_deg;
-
-    dbg_tim2_cr1  = htim2.Instance->CR1;
-    dbg_tim2_smcr = htim2.Instance->SMCR;
-    dbg_tim2_ccer = htim2.Instance->CCER;
-
-    dbg_target_final_deg = target_final_deg;
-    dbg_target_ramped_deg = target_ramped_deg;
-    dbg_state = (int)state;
+    // A4988 ENABLE activo en LOW
+    HAL_GPIO_WritePin(STEP_EN_PORT, STEP_EN_PIN, GPIO_PIN_RESET);
 }
 
-
-
-static float clamp_float(float x, float min, float max)
+static void Stepper_Disable(void)
 {
-    if (x < min) return min;
-    if (x > max) return max;
-    return x;
+    HAL_GPIO_WritePin(STEP_EN_PORT, STEP_EN_PIN, GPIO_PIN_SET);
 }
 
-static int clamp_int(int x, int min, int max)
+static void Stepper_SetDir(uint8_t dir)
 {
-    if (x < min) return min;
-    if (x > max) return max;
-    return x;
-}
-
-static void Servo_WriteUs(uint16_t pulse_us)
-{
-    pulse_us = clamp_int(pulse_us, SERVO_MIN_US, SERVO_MAX_US);
-    __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, pulse_us);
-}
-
-static int32_t Encoder_GetCount(void)
-{
-    return (int32_t)__HAL_TIM_GET_COUNTER(&htim2);
-}
-
-static float Encoder_GetAngleDeg(void)
-{
-    int32_t count = Encoder_GetCount();
-
-    float revolutions = ((float)count) / ENC_COUNTS_PER_REV;
-    float delta_deg = revolutions * 360.0f * ENCODER_DIRECTION;
-
-    return ANGLE_START_DEG + delta_deg;
-}
-
-static void Encoder_SetCurrentPositionAs90Deg(void)
-{
-    __HAL_TIM_SET_COUNTER(&htim2, 0);
-
-    prev_angle_deg = ANGLE_START_DEG;
-    target_final_deg = ANGLE_CENTER_DEG;
-    target_ramped_deg = ANGLE_CENTER_DEG;
-    pid_integral = 0.0f;
-}
-
-static void UpdateRampedTarget(float dt_s)
-{
-    target_final_deg = clamp_float(target_final_deg, ANGLE_MIN_DEG, ANGLE_MAX_DEG);
-
-    float diff = target_final_deg - target_ramped_deg;
-    float max_step = TARGET_SPEED_DPS * dt_s;
-
-    if (fabsf(diff) <= max_step)
+    if (dir)
     {
-        target_ramped_deg = target_final_deg;
+        HAL_GPIO_WritePin(STEP_DIR_PORT, STEP_DIR_PIN, DIR_POSITIVE);
     }
     else
     {
-        if (diff > 0.0f)
-            target_ramped_deg += max_step;
-        else
-            target_ramped_deg -= max_step;
-    }
-
-    target_ramped_deg = clamp_float(target_ramped_deg, ANGLE_MIN_DEG, ANGLE_MAX_DEG);
-}
-
-static void UpdateMotionState(float angle_deg)
-{
-    uint32_t now = HAL_GetTick();
-
-    switch (state)
-    {
-        case ST_HOLD_CENTER_START:
-            target_final_deg = ANGLE_CENTER_DEG;
-
-            if (now - state_start_ms > 1500)
-            {
-                state = ST_MOVE_FRONT;
-                state_start_ms = now;
-            }
-            break;
-
-        case ST_MOVE_FRONT:
-            target_final_deg = ANGLE_FRONT_DEG;
-
-            if ((fabsf(angle_deg - ANGLE_FRONT_DEG) < 2.0f) &&
-                (fabsf(target_ramped_deg - ANGLE_FRONT_DEG) < 0.5f))
-            {
-                state = ST_HOLD_FRONT;
-                state_start_ms = now;
-            }
-            break;
-
-        case ST_HOLD_FRONT:
-            target_final_deg = ANGLE_FRONT_DEG;
-
-            if (now - state_start_ms > 2000)
-            {
-                state = ST_MOVE_CENTER_1;
-                state_start_ms = now;
-            }
-            break;
-
-        case ST_MOVE_CENTER_1:
-            target_final_deg = ANGLE_CENTER_DEG;
-
-            if ((fabsf(angle_deg - ANGLE_CENTER_DEG) < 2.0f) &&
-                (fabsf(target_ramped_deg - ANGLE_CENTER_DEG) < 0.5f))
-            {
-                state = ST_HOLD_CENTER_1;
-                state_start_ms = now;
-            }
-            break;
-
-        case ST_HOLD_CENTER_1:
-            target_final_deg = ANGLE_CENTER_DEG;
-
-            if (now - state_start_ms > 1000)
-            {
-                state = ST_MOVE_BACK;
-                state_start_ms = now;
-            }
-            break;
-
-        case ST_MOVE_BACK:
-            target_final_deg = ANGLE_BACK_DEG;
-
-            if ((fabsf(angle_deg - ANGLE_BACK_DEG) < 2.0f) &&
-                (fabsf(target_ramped_deg - ANGLE_BACK_DEG) < 0.5f))
-            {
-                state = ST_HOLD_BACK;
-                state_start_ms = now;
-            }
-            break;
-
-        case ST_HOLD_BACK:
-            target_final_deg = ANGLE_BACK_DEG;
-
-            if (now - state_start_ms > 2000)
-            {
-                state = ST_MOVE_CENTER_2;
-                state_start_ms = now;
-            }
-            break;
-
-        case ST_MOVE_CENTER_2:
-            target_final_deg = ANGLE_CENTER_DEG;
-
-            if ((fabsf(angle_deg - ANGLE_CENTER_DEG) < 2.0f) &&
-                (fabsf(target_ramped_deg - ANGLE_CENTER_DEG) < 0.5f))
-            {
-                state = ST_HOLD_CENTER_2;
-                state_start_ms = now;
-            }
-            break;
-
-        case ST_HOLD_CENTER_2:
-            target_final_deg = ANGLE_CENTER_DEG;
-
-            if (now - state_start_ms > 1000)
-            {
-                state = ST_MOVE_FRONT;
-                state_start_ms = now;
-            }
-            break;
-
-        default:
-            state = ST_HOLD_CENTER_START;
-            state_start_ms = now;
-            break;
+        HAL_GPIO_WritePin(STEP_DIR_PORT, STEP_DIR_PIN, DIR_NEGATIVE);
     }
 }
 
-static void ControlLoop_Update(void)
+static uint32_t Stepper_MmS_To_StepsS(float speed_mm_s)
 {
-    uint32_t now = HAL_GetTick();
-
-    if (now - last_control_ms < CONTROL_PERIOD_MS)
+    if (speed_mm_s < MIN_SPEED_MM_S)
     {
+        speed_mm_s = MIN_SPEED_MM_S;
+    }
+
+    return (uint32_t)(speed_mm_s * STEPS_PER_MM);
+}
+
+static void Stepper_SetSpeedStepsPerSec(uint32_t steps_per_sec)
+{
+    if (steps_per_sec == 0)
+    {
+        HAL_TIM_PWM_Stop(&STEP_TIM, STEP_TIM_CHANNEL);
         return;
     }
 
-    float dt_s = (now - last_control_ms) / 1000.0f;
-    last_control_ms = now;
+    /*
+       Timer tick = 1 us.
+       Frecuencia STEP = steps_per_sec.
+       Periodo_us = 1 000 000 / steps_per_sec.
+    */
+    uint32_t period_us = STEP_TIMER_TICK_HZ / steps_per_sec;
 
-    if ((dt_s <= 0.0f) || (dt_s > 0.1f))
+    // Seguridad básica: no generar pulsos excesivamente rápidos.
+    if (period_us < 20)
     {
-        dt_s = CONTROL_PERIOD_MS / 1000.0f;
+        period_us = 20;
     }
 
-    float angle_deg = Encoder_GetAngleDeg();
+    uint32_t arr = period_us - 1;
+    uint32_t ccr = period_us / 2;
 
-    if ((angle_deg < 0.0f) || (angle_deg > 180.0f))
-    {
-        Servo_WriteUs(SERVO_NEUTRAL_US);
-        pid_integral = 0.0f;
-        return;
-    }
-
-    UpdateMotionState(angle_deg);
-    UpdateRampedTarget(dt_s);
-
-    float velocity_dps = (angle_deg - prev_angle_deg) / dt_s;
-    prev_angle_deg = angle_deg;
-
-    float error_deg = target_ramped_deg - angle_deg;
-
-    pid_integral += error_deg * dt_s;
-    pid_integral = clamp_float(pid_integral, -INTEGRAL_LIMIT, INTEGRAL_LIMIT);
-
-    float u = KP * error_deg + KI * pid_integral - KD * velocity_dps;
-
-    u = clamp_float(u, -SERVO_MAX_OFFSET_US, SERVO_MAX_OFFSET_US);
-
-    dbg_target_final_deg = target_final_deg;
-    dbg_target_ramped_deg = target_ramped_deg;
-    dbg_error_deg = error_deg;
-    dbg_velocity_dps = velocity_dps;
-    dbg_control_u = u;
-    dbg_state = (int)state;
-
-
-
-    if ((angle_deg <= ANGLE_MIN_DEG) && (u < 0.0f))
-    {
-        u = 0.0f;
-        pid_integral = 0.0f;
-    }
-
-    if ((angle_deg >= ANGLE_MAX_DEG) && (u > 0.0f))
-    {
-        u = 0.0f;
-        pid_integral = 0.0f;
-    }
-
-    int pulse_us = SERVO_NEUTRAL_US + (int)(SERVO_DIRECTION * u);
-
-    pulse_us = clamp_int(pulse_us, SERVO_MIN_US, SERVO_MAX_US);
-
-    dbg_pulse_us = pulse_us;
-
-    Servo_WriteUs((uint16_t)pulse_us);
+    __HAL_TIM_SET_AUTORELOAD(&STEP_TIM, arr);
+    __HAL_TIM_SET_COMPARE(&STEP_TIM, STEP_TIM_CHANNEL, ccr);
+    __HAL_TIM_SET_COUNTER(&STEP_TIM, 0);
 }
 
-//-------------------------------------------------------------------------------------------------
-
-static void DWT_Init(void)
+static void Stepper_StartStepsPerSec(uint32_t steps_per_sec, uint8_t dir)
 {
-  CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
-  DWT->CYCCNT = 0;
-  DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+    Stepper_SetDir(dir);
+    Stepper_SetSpeedStepsPerSec(steps_per_sec);
+
+    Stepper_Enable();
+
+    HAL_TIM_PWM_Start(&STEP_TIM, STEP_TIM_CHANNEL);
 }
 
-static void delay_us(uint32_t us)
+static void Stepper_StartMmS(float speed_mm_s, uint8_t dir)
 {
-  uint32_t start = DWT->CYCCNT;
-  uint32_t ticks = us * (HAL_RCC_GetHCLKFreq() / 1000000U);
-  while ((DWT->CYCCNT - start) < ticks);
+    uint32_t steps_per_sec = Stepper_MmS_To_StepsS(speed_mm_s);
+    Stepper_StartStepsPerSec(steps_per_sec, dir);
 }
+
+static void Stepper_StopHold(void)
+{
+    HAL_TIM_PWM_Stop(&STEP_TIM, STEP_TIM_CHANNEL);
+
+    // Mantiene el driver activado para que el motor tenga par de mantenimiento.
+    Stepper_Enable();
+}
+
+static void Stepper_StopFree(void)
+{
+    HAL_TIM_PWM_Stop(&STEP_TIM, STEP_TIM_CHANNEL);
+
+    // Desactiva el driver: el motor queda libre.
+    Stepper_Disable();
+}
+
+//-----------------------------------------------------------------------
 
 /* USER CODE END 0 */
 
@@ -450,42 +227,20 @@ int main(void)
   MX_GPIO_Init();
   MX_TIM1_Init();
   MX_TIM2_Init();
+  MX_TIM3_Init();
+  MX_TIM4_Init();
   /* USER CODE BEGIN 2 */
-  //HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);	// Posicion del motor 1
-  HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2);	// Posicion del motor 2
-  HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);	// Posicion del motor del revolver
 
-  HAL_GPIO_WritePin(GPIOB, EN_Pin, GPIO_PIN_SET);     // habilitado siempre durante pruebas
-  HAL_GPIO_WritePin(GPIOB, STEP_Pin, GPIO_PIN_RESET);
-  HAL_GPIO_WritePin(GPIOB, DIR_Pin, GPIO_PIN_RESET);
+  //-----------------------------stepper------------------------------------------
 
-  DWT_Init();
-
-  uint32_t stepLowUs = 2500;    // arranque suave
-  uint32_t accelCount = 0;
-  int8_t lastDir = 0;           // -1, +1, 0
-
-//------------------------------------------------------------
-
-  HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
-  __HAL_TIM_MOE_ENABLE(&htim1);
-
-  HAL_TIM_Encoder_Start(&htim2, TIM_CHANNEL_ALL);
-  __HAL_TIM_SET_COUNTER(&htim2, 0);
-
-  /*
-     Antes de arrancar:
-     coloca físicamente el eslabón en 90 grados.
-  */
-  Encoder_SetCurrentPositionAs90Deg();
-
-  Servo_WriteUs(SERVO_NEUTRAL_US);
-
+  Stepper_Disable();
   HAL_Delay(1000);
 
-  state = ST_HOLD_CENTER_START;
-  state_start_ms = HAL_GetTick();
-  last_control_ms = HAL_GetTick();
+  Stepper_Enable();
+
+
+//---------------------------------------------------------------------------------
+
 
   /* USER CODE END 2 */
 
@@ -497,9 +252,20 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
 
-	  ControlLoop_Update();
+	  // Sentido 1: 20 mm/s durante 3 segundos
+	     Stepper_StartMmS(40.0f, 1);
+	     HAL_Delay(2000);
 
-	  Debug_UpdateEncoder();
+	     Stepper_StopHold();
+	     HAL_Delay(1000);
+
+	     // Sentido 2: 20 mm/s durante 3 segundos
+	     Stepper_StartMmS(40.0f, 0);
+	     HAL_Delay(2000);
+
+	     Stepper_StopHold();
+	     HAL_Delay(1000);
+
 /*
 	  // Parado / neutro
 	     Servo_WriteUs(1500);
@@ -765,6 +531,104 @@ static void MX_TIM2_Init(void)
 }
 
 /**
+  * @brief TIM3 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM3_Init(void)
+{
+
+  /* USER CODE BEGIN TIM3_Init 0 */
+
+  /* USER CODE END TIM3_Init 0 */
+
+  TIM_Encoder_InitTypeDef sConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM3_Init 1 */
+
+  /* USER CODE END TIM3_Init 1 */
+  htim3.Instance = TIM3;
+  htim3.Init.Prescaler = 0;
+  htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim3.Init.Period = 65535;
+  htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  sConfig.EncoderMode = TIM_ENCODERMODE_TI1;
+  sConfig.IC1Polarity = TIM_ICPOLARITY_RISING;
+  sConfig.IC1Selection = TIM_ICSELECTION_DIRECTTI;
+  sConfig.IC1Prescaler = TIM_ICPSC_DIV1;
+  sConfig.IC1Filter = 0;
+  sConfig.IC2Polarity = TIM_ICPOLARITY_RISING;
+  sConfig.IC2Selection = TIM_ICSELECTION_DIRECTTI;
+  sConfig.IC2Prescaler = TIM_ICPSC_DIV1;
+  sConfig.IC2Filter = 0;
+  if (HAL_TIM_Encoder_Init(&htim3, &sConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM3_Init 2 */
+
+  /* USER CODE END TIM3_Init 2 */
+
+}
+
+/**
+  * @brief TIM4 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM4_Init(void)
+{
+
+  /* USER CODE BEGIN TIM4_Init 0 */
+
+  /* USER CODE END TIM4_Init 0 */
+
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+  TIM_OC_InitTypeDef sConfigOC = {0};
+
+  /* USER CODE BEGIN TIM4_Init 1 */
+
+  /* USER CODE END TIM4_Init 1 */
+  htim4.Instance = TIM4;
+  htim4.Init.Prescaler = 49;
+  htim4.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim4.Init.Period = 1999;
+  htim4.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim4.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_PWM_Init(&htim4) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim4, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sConfigOC.OCMode = TIM_OCMODE_PWM1;
+  sConfigOC.Pulse = 1000;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  if (HAL_TIM_PWM_ConfigChannel(&htim4, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM4_Init 2 */
+
+  /* USER CODE END TIM4_Init 2 */
+  HAL_TIM_MspPostInit(&htim4);
+
+}
+
+/**
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
@@ -778,24 +642,24 @@ static void MX_GPIO_Init(void)
 
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOA_CLK_ENABLE();
-  __HAL_RCC_GPIOB_CLK_ENABLE();
   __HAL_RCC_GPIOE_CLK_ENABLE();
+  __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, STEP_Pin|DIR_Pin|EN_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, EN_Pin|DIR_Pin|ENABLE_Pin, GPIO_PIN_RESET);
 
-  /*Configure GPIO pins : STEP_Pin DIR_Pin EN_Pin */
-  GPIO_InitStruct.Pin = STEP_Pin|DIR_Pin|EN_Pin;
+  /*Configure GPIO pins : EN_Pin DIR_Pin ENABLE_Pin */
+  GPIO_InitStruct.Pin = EN_Pin|DIR_Pin|ENABLE_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : Paso_Izq_Pin Paso_dcha_Pin */
-  GPIO_InitStruct.Pin = Paso_Izq_Pin|Paso_dcha_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  /*Configure GPIO pins : PA8 PA9 */
+  GPIO_InitStruct.Pin = GPIO_PIN_8|GPIO_PIN_9;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
