@@ -65,6 +65,10 @@ void Error_Handler(void);
 #define ENC_BASE_B_GPIO_Port GPIOA
 #define EN_Pin GPIO_PIN_10
 #define EN_GPIO_Port GPIOB
+#define FC_Izquierda_Pin GPIO_PIN_8
+#define FC_Izquierda_GPIO_Port GPIOA
+#define FC_Derecha_Pin GPIO_PIN_9
+#define FC_Derecha_GPIO_Port GPIOA
 #define STEP_Pin GPIO_PIN_6
 #define STEP_GPIO_Port GPIOB
 #define DIR_Pin GPIO_PIN_7

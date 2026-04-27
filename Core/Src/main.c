@@ -80,6 +80,75 @@ TIM_HandleTypeDef htim4;
 
 //-----------------------------------------------------------------------
 
+
+//------------------FCs-------------------------------------------
+
+#define LIMIT_MIN_PORT          GPIOA
+#define LIMIT_MIN_PIN           GPIO_PIN_8
+
+#define LIMIT_MAX_PORT          GPIOA
+#define LIMIT_MAX_PIN           GPIO_PIN_9
+
+volatile uint8_t limit_min_hit = 0;
+volatile uint8_t limit_max_hit = 0;
+
+volatile uint8_t stepper_is_running = 0;
+volatile uint8_t stepper_current_dir = 0;
+
+// Para antirrebote básico
+volatile uint32_t last_limit_min_ms = 0;
+volatile uint32_t last_limit_max_ms = 0;
+
+//-----------------------------------------------------------------------
+
+
+//------------------Encoder_Base-------------------------------------------
+
+#define ENC_TIM                 htim3
+
+volatile int32_t encoder_position_counts = 0;
+static uint16_t encoder_last_raw = 0;
+
+volatile int32_t encoder_total_counts = 0;
+volatile int32_t encoder_mid_counts = 0;
+
+volatile uint8_t homing_done = 0;
+
+// Debug
+volatile uint16_t dbg_enc_raw = 0;
+volatile int32_t dbg_enc_pos = 0;
+volatile int32_t dbg_enc_total = 0;
+volatile int32_t dbg_enc_mid = 0;
+volatile uint8_t dbg_homing_state = 0;
+
+//-----------------------------------------------------------------------
+
+//------------------Maquina estados Homing-------------------------------------------
+typedef enum
+{
+    HOMING_START = 0,
+    HOMING_MOVE_TO_MIN,
+    HOMING_AT_MIN,
+    HOMING_MOVE_TO_MAX,
+    HOMING_AT_MAX,
+    HOMING_MOVE_TO_MID,
+    HOMING_DONE
+} HomingState;
+
+volatile HomingState homing_state = HOMING_START;
+
+#define BASE_SPEED_MM_S         40.0f
+
+// Según tu prueba anterior, esto debería estar así.
+// Si ves que va al lado contrario, los intercambiamos.
+#define DIR_TO_MIN              0
+#define DIR_TO_MAX              1
+
+// Margen de parada en cuentas de encoder para el punto medio.
+#define MID_TOLERANCE_COUNTS    5
+
+//-----------------------------------------------------------------------
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -91,6 +160,8 @@ static void MX_TIM3_Init(void);
 static void MX_TIM4_Init(void);
 /* USER CODE BEGIN PFP */
 
+
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -100,7 +171,7 @@ static void MX_TIM4_Init(void);
 
 static void Stepper_Enable(void)
 {
-    // A4988 ENABLE activo en LOW
+    // A4988: ENABLE activo en LOW
     HAL_GPIO_WritePin(STEP_EN_PORT, STEP_EN_PIN, GPIO_PIN_RESET);
 }
 
@@ -139,14 +210,8 @@ static void Stepper_SetSpeedStepsPerSec(uint32_t steps_per_sec)
         return;
     }
 
-    /*
-       Timer tick = 1 us.
-       Frecuencia STEP = steps_per_sec.
-       Periodo_us = 1 000 000 / steps_per_sec.
-    */
     uint32_t period_us = STEP_TIMER_TICK_HZ / steps_per_sec;
 
-    // Seguridad básica: no generar pulsos excesivamente rápidos.
     if (period_us < 20)
     {
         period_us = 20;
@@ -165,6 +230,9 @@ static void Stepper_StartStepsPerSec(uint32_t steps_per_sec, uint8_t dir)
     Stepper_SetDir(dir);
     Stepper_SetSpeedStepsPerSec(steps_per_sec);
 
+    stepper_current_dir = dir;
+    stepper_is_running = 1;
+
     Stepper_Enable();
 
     HAL_TIM_PWM_Start(&STEP_TIM, STEP_TIM_CHANNEL);
@@ -180,19 +248,260 @@ static void Stepper_StopHold(void)
 {
     HAL_TIM_PWM_Stop(&STEP_TIM, STEP_TIM_CHANNEL);
 
-    // Mantiene el driver activado para que el motor tenga par de mantenimiento.
+    stepper_is_running = 0;
+
+    // Mantiene par
     Stepper_Enable();
 }
 
-static void Stepper_StopFree(void)
-{
-    HAL_TIM_PWM_Stop(&STEP_TIM, STEP_TIM_CHANNEL);
+//-----------------------------------------------------------------------
 
-    // Desactiva el driver: el motor queda libre.
-    Stepper_Disable();
+//-----------------------------FCs------------------------------------------
+static uint8_t LimitMin_IsPressed(void)
+{
+    return (HAL_GPIO_ReadPin(LIMIT_MIN_PORT, LIMIT_MIN_PIN) == GPIO_PIN_RESET);
+}
+
+static uint8_t LimitMax_IsPressed(void)
+{
+    return (HAL_GPIO_ReadPin(LIMIT_MAX_PORT, LIMIT_MAX_PIN) == GPIO_PIN_RESET);
+}
+
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+    uint32_t now = HAL_GetTick();
+
+    if (GPIO_Pin == LIMIT_MIN_PIN)
+    {
+        if (now - last_limit_min_ms < 50)
+        {
+            return;
+        }
+
+        last_limit_min_ms = now;
+
+        if (LimitMin_IsPressed())
+        {
+            limit_min_hit = 1;
+
+            // Suponemos dir = 0 hacia MIN
+            if (stepper_is_running && stepper_current_dir == 0)
+            {
+                Stepper_StopHold();
+            }
+        }
+    }
+
+    if (GPIO_Pin == LIMIT_MAX_PIN)
+    {
+        if (now - last_limit_max_ms < 50)
+        {
+            return;
+        }
+
+        last_limit_max_ms = now;
+
+        if (LimitMax_IsPressed())
+        {
+            limit_max_hit = 1;
+
+            // Suponemos dir = 1 hacia MAX
+            if (stepper_is_running && stepper_current_dir == 1)
+            {
+                Stepper_StopHold();
+            }
+        }
+    }
+}
+
+
+//-----------------------------------------------------------------------
+
+//------------------Encoder_Base-------------------------------------------
+static void Encoder_Start(void)
+{
+    HAL_TIM_Encoder_Start(&ENC_TIM, TIM_CHANNEL_ALL);
+
+    __HAL_TIM_SET_COUNTER(&ENC_TIM, 0);
+
+    encoder_last_raw = 0;
+    encoder_position_counts = 0;
+}
+
+static void Encoder_ResetPosition(void)
+{
+    __HAL_TIM_SET_COUNTER(&ENC_TIM, 0);
+
+    encoder_last_raw = 0;
+    encoder_position_counts = 0;
+}
+
+static void Encoder_Update(void)
+{
+    uint16_t raw_now = (uint16_t)__HAL_TIM_GET_COUNTER(&ENC_TIM);
+
+    /*
+       Resta con int16_t para gestionar automáticamente overflow de 16 bits.
+       Ejemplo:
+       65535 -> 0 cuenta como +1
+       0 -> 65535 cuenta como -1
+    */
+    int16_t delta = (int16_t)(raw_now - encoder_last_raw);
+
+    encoder_last_raw = raw_now;
+
+    encoder_position_counts += delta;
+
+    dbg_enc_raw = raw_now;
+    dbg_enc_pos = encoder_position_counts;
+    dbg_enc_total = encoder_total_counts;
+    dbg_enc_mid = encoder_mid_counts;
 }
 
 //-----------------------------------------------------------------------
+
+//------------------Maquina estados Homing-------------------------------------------
+
+static void Homing_Update(void)
+{
+    Encoder_Update();
+
+    dbg_homing_state = (uint8_t)homing_state;
+
+    switch (homing_state)
+    {
+        case HOMING_START:
+        {
+            homing_done = 0;
+
+            limit_min_hit = 0;
+            limit_max_hit = 0;
+
+            Stepper_StartMmS(BASE_SPEED_MM_S, DIR_TO_MIN);
+
+            homing_state = HOMING_MOVE_TO_MIN;
+            break;
+        }
+
+        case HOMING_MOVE_TO_MIN:
+        {
+            if (LimitMin_IsPressed() || limit_min_hit)
+            {
+                Stepper_StopHold();
+                HAL_Delay(200);
+
+                Encoder_ResetPosition();
+
+                limit_min_hit = 0;
+                limit_max_hit = 0;
+
+                homing_state = HOMING_AT_MIN;
+            }
+            break;
+        }
+
+        case HOMING_AT_MIN:
+        {
+            HAL_Delay(300);
+
+            Stepper_StartMmS(BASE_SPEED_MM_S, DIR_TO_MAX);
+
+            homing_state = HOMING_MOVE_TO_MAX;
+            break;
+        }
+
+        case HOMING_MOVE_TO_MAX:
+        {
+            if (LimitMax_IsPressed() || limit_max_hit)
+            {
+                Stepper_StopHold();
+                HAL_Delay(200);
+
+                Encoder_Update();
+
+                encoder_total_counts = encoder_position_counts;
+
+                /*
+                   Si el encoder cuenta negativo al ir hacia MAX,
+                   lo convertimos a positivo.
+                */
+                if (encoder_total_counts < 0)
+                {
+                    encoder_total_counts = -encoder_total_counts;
+                    encoder_position_counts = encoder_total_counts;
+                }
+
+                encoder_mid_counts = encoder_total_counts / 2;
+
+                limit_min_hit = 0;
+                limit_max_hit = 0;
+
+                homing_state = HOMING_AT_MAX;
+            }
+            break;
+        }
+
+        case HOMING_AT_MAX:
+        {
+            HAL_Delay(300);
+
+            /*
+               Estamos en MAX y queremos ir al punto medio.
+               Por tanto, vamos hacia MIN hasta que la posición sea <= mid.
+            */
+            Stepper_StartMmS(BASE_SPEED_MM_S, DIR_TO_MIN);
+
+            homing_state = HOMING_MOVE_TO_MID;
+            break;
+        }
+
+        case HOMING_MOVE_TO_MID:
+        {
+            /*
+               Caso normal:
+               MIN = 0
+               MAX = encoder_total_counts
+               vamos desde MAX hacia MID, así que encoder_position_counts baja.
+            */
+            if (encoder_position_counts <= encoder_mid_counts + MID_TOLERANCE_COUNTS)
+            {
+                Stepper_StopHold();
+
+                homing_done = 1;
+                homing_state = HOMING_DONE;
+            }
+
+            /*
+               Seguridad extra: si toca MIN antes de llegar al medio, parar.
+            */
+            if (LimitMin_IsPressed() || limit_min_hit)
+            {
+                Stepper_StopHold();
+
+                homing_done = 0;
+                homing_state = HOMING_DONE;
+            }
+
+            break;
+        }
+
+        case HOMING_DONE:
+        {
+            Stepper_StopHold();
+            break;
+        }
+
+        default:
+        {
+            Stepper_StopHold();
+            homing_state = HOMING_DONE;
+            break;
+        }
+    }
+}
+
+//-----------------------------------------------------------------------
+
 
 /* USER CODE END 0 */
 
@@ -239,7 +548,21 @@ int main(void)
   Stepper_Enable();
 
 
-//---------------------------------------------------------------------------------
+  //---------------------------------------------------------------------------------
+
+  //-----------------------------stepper------------------------------------------
+
+  Encoder_Start();
+
+  //---------------------------------------------------------------------------------
+
+  //------------------Maquina estados Homing-------------------------------------------
+
+  homing_state = HOMING_START;
+  homing_done = 0;
+
+
+  //---------------------------------------------------------------------------------
 
 
   /* USER CODE END 2 */
@@ -251,6 +574,52 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+
+	  Homing_Update();
+/*
+	  limit_min_hit = 0;
+	     limit_max_hit = 0;
+
+	     // Mover hacia un lado
+	     Stepper_StartMmS(40.0f, 0);
+
+	     while (!limit_min_hit)
+	     {
+	         // seguridad extra por polling
+	         if (LimitMin_IsPressed())
+	         {
+	             limit_min_hit = 1;
+	             Stepper_StopHold();
+	             break;
+	         }
+	     }
+
+	     Stepper_StopHold();
+	     HAL_Delay(1000);
+
+	     limit_min_hit = 0;
+	     limit_max_hit = 0;
+
+	     // Mover hacia el otro lado
+	     Stepper_StartMmS(40.0f, 1);
+
+	     while (!limit_max_hit)
+	     {
+	         // seguridad extra por polling
+	         if (LimitMax_IsPressed())
+	         {
+	             limit_max_hit = 1;
+	             Stepper_StopHold();
+	             break;
+	         }
+	     }
+
+	     Stepper_StopHold();
+	     HAL_Delay(1000);
+
+*/
+//------------------------------------------------
+/*
 
 	  // Sentido 1: 20 mm/s durante 3 segundos
 	     Stepper_StartMmS(40.0f, 1);
@@ -265,87 +634,7 @@ int main(void)
 
 	     Stepper_StopHold();
 	     HAL_Delay(1000);
-
-/*
-	  // Parado / neutro
-	     Servo_WriteUs(1500);
-	     HAL_Delay(2000);
-
-	     // Máximo sentido 1
-	     Servo_WriteUs(2500);
-	     HAL_Delay(3000);
-
-	     // Parado / neutro
-	     Servo_WriteUs(1500);
-	     HAL_Delay(2000);
-
-	     // Máximo sentido 2
-	     Servo_WriteUs(500);
-	     HAL_Delay(3000);
-	  //HAL_Delay(50);
 */
-/*
-//---------------PRUEBA MOTOR PASO A PASO--------------------
-
-	  uint8_t btn1 = (HAL_GPIO_ReadPin(GPIOB, Paso_dcha_Pin) == GPIO_PIN_RESET);
-	  uint8_t btn2 = (HAL_GPIO_ReadPin(GPIOB, Paso_Izq_Pin) == GPIO_PIN_RESET);
-
-	  if (btn1 && !btn2)
-	  {
-	    if (lastDir != -1)
-	    {
-	      HAL_GPIO_WritePin(GPIOB, DIR_Pin, GPIO_PIN_RESET);
-	      delay_us(2000);        // pequeña pausa al cambiar de sentido
-	      stepLowUs = 2500;
-	      accelCount = 0;
-	      lastDir = -1;
-	    }
-
-	    HAL_GPIO_WritePin(GPIOB, STEP_Pin, GPIO_PIN_SET);
-	    delay_us(20);            // pulso alto amplio
-	    HAL_GPIO_WritePin(GPIOB, STEP_Pin, GPIO_PIN_RESET);
-	    delay_us(stepLowUs);
-
-	    accelCount++;
-	    if (accelCount >= 25 && stepLowUs > 800)
-	    {
-	      stepLowUs -= 50;       // acelera poco a poco
-	      accelCount = 0;
-	    }
-	  }
-	  else if (btn2 && !btn1)
-	  {
-	    if (lastDir != 1)
-	    {
-	      HAL_GPIO_WritePin(GPIOB, DIR_Pin, GPIO_PIN_SET);
-	      delay_us(2000);
-	      stepLowUs = 2500;
-	      accelCount = 0;
-	      lastDir = 1;
-	    }
-
-	    HAL_GPIO_WritePin(GPIOB, STEP_Pin, GPIO_PIN_SET);
-	    delay_us(20);
-	    HAL_GPIO_WritePin(GPIOB, STEP_Pin, GPIO_PIN_RESET);
-	    delay_us(stepLowUs);
-
-	    accelCount++;
-	    if (accelCount >= 25 && stepLowUs > 800)
-	    {
-	      stepLowUs -= 50;
-	      accelCount = 0;
-	    }
-	  }
-	  else
-	  {
-	    HAL_GPIO_WritePin(GPIOB, STEP_Pin, GPIO_PIN_RESET);
-	    stepLowUs = 2500;
-	    accelCount = 0;
-	    lastDir = 0;
-	  }
-//----------------------------------------------------------------
-*/
-
 
 
   }
@@ -558,7 +847,7 @@ static void MX_TIM3_Init(void)
   sConfig.IC1Polarity = TIM_ICPOLARITY_RISING;
   sConfig.IC1Selection = TIM_ICSELECTION_DIRECTTI;
   sConfig.IC1Prescaler = TIM_ICPSC_DIV1;
-  sConfig.IC1Filter = 0;
+  sConfig.IC1Filter = 8;
   sConfig.IC2Polarity = TIM_ICPOLARITY_RISING;
   sConfig.IC2Selection = TIM_ICSELECTION_DIRECTTI;
   sConfig.IC2Prescaler = TIM_ICPSC_DIV1;
@@ -655,9 +944,9 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : PA8 PA9 */
-  GPIO_InitStruct.Pin = GPIO_PIN_8|GPIO_PIN_9;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  /*Configure GPIO pins : FC_Izquierda_Pin FC_Derecha_Pin */
+  GPIO_InitStruct.Pin = FC_Izquierda_Pin|FC_Derecha_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
