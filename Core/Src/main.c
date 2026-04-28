@@ -83,8 +83,8 @@ TIM_HandleTypeDef htim4;
 volatile uint8_t stepper_is_running = 0;
 volatile uint8_t stepper_current_dir = 0;
 
-#define DIR_TO_RIGHT            1
-#define DIR_TO_LEFT             0
+#define DIR_TO_RIGHT            0
+#define DIR_TO_LEFT             1
 
 //-----------------------------------------------------------------------
 
