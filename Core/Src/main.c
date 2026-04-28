@@ -199,21 +199,6 @@ static void Stepper_StopFree(void)
 
 //-----------------------------------------------------------------------
 
-//-------------CODIGO MOTOR 1----------------------
-
-void R1_SetVelocity(uint16_t vel)
-{
-	if (vel >= 2000) vel = 2000;
-	if (vel <= 1000) vel = 1000;
-    __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, vel);
-}
-
-void R1_Quieto(){
-	R1_SetVelocity(1500);
-}
-
-//-----------------------------------------------------
-
 //-------------------Código Encoder Motor 1 -----------------------------------
 volatile float resultado = 0;
 
@@ -235,6 +220,45 @@ void Encoder_Reset(void) //esta función sirve para setear el 0 del encoder dond
 }
 
 //------------------------------------------------------------------------------
+
+//-------------CODIGO MOTOR 1----------------------
+void R1_SetVelocity(uint16_t vel)
+{
+	if (vel >= 2000) vel = 2000;
+	if (vel <= 1000) vel = 1000;
+    __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, vel);
+}
+
+void R1_Quieto(){
+	R1_SetVelocity(1500);
+}
+
+void R1_ControlPosition(float target_deg)
+{
+    float current = Encoder_GetDegrees();
+
+    float error = target_deg - current;
+
+    // Ganancia (ajustable)
+    float Kp = 5.0f;
+
+    float output = 1500 + (error * Kp);
+
+    // saturación servo
+    if (output > 2000) output = 2000;
+    if (output < 1000) output = 1000;
+
+    //Evitar vibracion
+    if (fabs(error) < 2.0f)
+    {
+        __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, 1500);
+        return;
+    }
+
+    __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, (uint16_t)output);
+}
+
+//-----------------------------------------------------
 
 /* USER CODE END 0 */
 
@@ -301,7 +325,7 @@ int main(void)
     /* USER CODE BEGIN 3 */
 
 
-	  Encoder_GetDegrees();
+	  Encoder_GetDegrees(); //Esto funciona a la perfeccion, necesario para el control de R1
 
 
 	  /*  // Sentido 1: 20 mm/s durante 3 segundos
@@ -317,19 +341,13 @@ int main(void)
 
 	     Stepper_StopHold();
 	     HAL_Delay(1000);
+	  */
 
 	  // Prueba movimientos R1
 
-	     R1_SetVelocity(1500);
-	     HAL_Delay(1000);
-	     R1_SetVelocity(2000);
-	     HAL_Delay(500);
-	     R1_SetVelocity(1500);
-	     HAL_Delay(1000);
-	     R1_SetVelocity(1000);
-	     HAL_Delay(500);
+	  R1_ControlPosition(90.0);
 
-	  */
+
 
   }
   /* USER CODE END 3 */
