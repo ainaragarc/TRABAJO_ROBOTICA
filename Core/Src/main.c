@@ -210,7 +210,40 @@ volatile uint32_t dbg_m1_enc_raw = 0;
 
 //-----------------------------------------------------------------------
 
+//------------------ Control posicion Motor 1 ----------------------------
 
+// IMPORTANTE:
+// Este valor hay que calibrarlo.
+// Después de hacer homing, mueve el eje hasta 180 grados físicos
+// y mira dbg_m1_enc_counts. Ese valor será M1_COUNTS_180.
+#define M1_COUNTS_180              1000.0f   // provisional, luego se cambia
+
+#define M1_CONTROL_PERIOD_MS       10
+
+#define M1_POS_TOLERANCE_DEG       1.0f
+
+// PWM alrededor del neutro
+#define M1_PWM_MIN_MOVE_US         80.0f
+#define M1_PWM_MAX_DELTA_US        400.0f
+
+// Ganancia proporcional: us de PWM por grado de error
+#define M1_KP_US_PER_DEG           8.0f
+
+// Si al mandar +30 grados se mueve hacia el final PA10, cambia esto a -1
+#define M1_CONTROL_SIGN            1
+
+volatile float m1_target_deg = 0.0f;
+volatile float m1_current_deg = 0.0f;
+volatile float m1_error_deg = 0.0f;
+
+volatile uint8_t m1_position_control_enabled = 0;
+
+volatile uint16_t dbg_m1_control_pwm = 1500;
+volatile float dbg_m1_target_deg = 0.0f;
+volatile float dbg_m1_current_deg = 0.0f;
+volatile float dbg_m1_error_deg = 0.0f;
+
+//-----------------------------------------------------------------------
 
 /* USER CODE END PV */
 
@@ -243,6 +276,12 @@ static uint8_t Motor1_ZeroFC_IsPressedRaw(void);
 static uint8_t Motor1_ZeroFC_IsPressedDebounced(void);
 static void Motor1_HomeZero_Start(void);
 static void Motor1_HomeZero_Update(void);
+
+//prototipos control
+static float Motor1_Counts_To_Deg(int32_t counts);
+static int32_t Motor1_Deg_To_Counts(float deg);
+static void Motor1_SetTargetDeg(float deg);
+static void Motor1_PositionControl_Update(void);
 
 //-----------------------------stepper------------------------------------------
 
@@ -698,29 +737,39 @@ static uint8_t Motor1_ZeroFC_IsPressedDebounced(void)
 
 static void Motor1_HomeZero_Start(void)
 {
-    m1_zero_done = 0;
-    m1_error = 0;
-    m1_fc_pressed_since_ms = 0;
+	 m1_zero_done = 0;
+	    m1_error = 0;
+	    m1_fc_pressed_since_ms = 0;
 
-    // Si ya está pisando el final, NO empujamos más.
-    if (Motor1_ZeroFC_IsPressedDebounced() || Motor1_ZeroFC_IsPressedRaw())
-    {
-        Motor1_Servo_Stop();
+	    // Por seguridad, antes de empezar, servo parado
+	    Motor1_Servo_Stop();
 
-        // Más adelante aquí resetearemos encoder a 0.
-        // Encoder_ResetPosition();
+	    // Si al arrancar ya está pisando el final PA10,
+	    // esa posición es directamente el cero físico.
+	    if (Motor1_ZeroFC_IsPressedRaw())
+	    {
+	        Motor1_Servo_Stop();
 
-        m1_zero_done = 1;
-        m1_state = M1_ZERO_OK;
-        return;
-    }
+	        // Seteamos encoder a cero en la posición del final
+	        Motor1_Encoder_ResetZero();
 
-    m1_home_start_ms = HAL_GetTick();
+	        m1_zero_done = 1;
+	        m1_error = 0;
+	        m1_state = M1_ZERO_OK;
 
-    // Movimiento lento hacia el final.
-    Motor1_Servo_SetUs(M1_SERVO_HOME_US);
+	        // Activamos control manteniendo posición 0 grados
+	        Motor1_SetTargetDeg(0.0f);
 
-    m1_state = M1_HOMING;
+	        return;
+	    }
+
+	    // Si no está en el final, empezamos búsqueda de cero
+	    m1_home_start_ms = HAL_GetTick();
+
+	    // Movimiento hacia el final de carrera PA10
+	    Motor1_Servo_SetUs(M1_SERVO_HOME_US);
+
+	    m1_state = M1_HOMING;
 }
 
 static void Motor1_HomeZero_Update(void)
@@ -742,14 +791,16 @@ static void Motor1_HomeZero_Update(void)
         {
         	if (Motor1_ZeroFC_IsPressedDebounced())
         	{
-        	    Motor1_Servo_Stop();
+        		Motor1_Servo_Stop();
 
-        	    // Esta posición física pasa a ser 0 grados reales
-        	    Motor1_Encoder_ResetZero();
+        		    Motor1_Encoder_ResetZero();
 
-        	    m1_zero_done = 1;
-        	    m1_error = 0;
-        	    m1_state = M1_ZERO_OK;
+        		    m1_zero_done = 1;
+        		    m1_error = 0;
+        		    m1_state = M1_ZERO_OK;
+
+        		    // Mantener cero después del homing
+        		    Motor1_SetTargetDeg(0.0f);
         	    break;
         	}
 
@@ -768,7 +819,7 @@ static void Motor1_HomeZero_Update(void)
 
         case M1_ZERO_OK:
         {
-            Motor1_Servo_Stop();
+
             break;
         }
 
@@ -840,6 +891,142 @@ static void Motor1_Encoder_Update(void)
 
 //-----------------------------------------------------------------------
 
+//------------------ Control posicion Motor 1 ----------------------------
+
+static float Motor1_Counts_To_Deg(int32_t counts)
+{
+    return ((float)counts * 180.0f) / M1_COUNTS_180;
+}
+
+static int32_t Motor1_Deg_To_Counts(float deg)
+{
+    return (int32_t)((deg * M1_COUNTS_180) / 180.0f);
+}
+
+static void Motor1_SetTargetDeg(float deg)
+{
+    if (deg < 0.0f)
+    {
+        deg = 0.0f;
+    }
+
+    if (deg > 180.0f)
+    {
+        deg = 180.0f;
+    }
+
+    m1_target_deg = deg;
+    m1_position_control_enabled = 1;
+
+    dbg_m1_target_deg = m1_target_deg;
+}
+
+static void Motor1_PositionControl_Update(void)
+{
+    static uint32_t last_control_ms = 0;
+
+    uint32_t now = HAL_GetTick();
+
+    if ((now - last_control_ms) < M1_CONTROL_PERIOD_MS)
+    {
+        return;
+    }
+
+    last_control_ms = now;
+
+    if (m1_state == M1_HOMING)
+    {
+        return;
+    }
+
+    // Si no se ha hecho cero todavía, no dejamos controlar posición
+    if (!m1_zero_done || m1_error)
+    {
+        Motor1_Servo_Stop();
+        m1_position_control_enabled = 0;
+        return;
+    }
+
+    if (!m1_position_control_enabled)
+    {
+        Motor1_Servo_Stop();
+        return;
+    }
+
+    Motor1_Encoder_Update();
+
+    m1_current_deg = Motor1_Counts_To_Deg(m1_encoder_counts);
+    m1_error_deg = m1_target_deg - m1_current_deg;
+
+    dbg_m1_current_deg = m1_current_deg;
+    dbg_m1_error_deg = m1_error_deg;
+    dbg_m1_target_deg = m1_target_deg;
+
+    // Seguridad de cero:
+    // si toca el final PA10, esa posición vuelve a ser cero absoluto.
+    if (Motor1_ZeroFC_IsPressedRaw())
+    {
+        Motor1_Encoder_ResetZero();
+        m1_current_deg = 0.0f;
+
+        // Si el objetivo era cerca de cero, nos quedamos parados.
+        if (m1_target_deg <= 1.0f)
+        {
+            Motor1_Servo_Stop();
+            dbg_m1_control_pwm = M1_SERVO_STOP_US;
+            return;
+        }
+    }
+
+    // Zona muerta: suficientemente cerca del objetivo
+    if (fabsf(m1_error_deg) <= M1_POS_TOLERANCE_DEG)
+    {
+        Motor1_Servo_Stop();
+        dbg_m1_control_pwm = M1_SERVO_STOP_US;
+        return;
+    }
+
+    float abs_error = fabsf(m1_error_deg);
+
+    float delta_pwm = M1_KP_US_PER_DEG * abs_error;
+
+    if (delta_pwm < M1_PWM_MIN_MOVE_US)
+    {
+        delta_pwm = M1_PWM_MIN_MOVE_US;
+    }
+
+    if (delta_pwm > M1_PWM_MAX_DELTA_US)
+    {
+        delta_pwm = M1_PWM_MAX_DELTA_US;
+    }
+
+    int16_t pwm_cmd = M1_SERVO_STOP_US;
+
+    if (m1_error_deg > 0.0f)
+    {
+        pwm_cmd = M1_SERVO_STOP_US + (int16_t)(M1_CONTROL_SIGN * delta_pwm);
+    }
+    else
+    {
+        pwm_cmd = M1_SERVO_STOP_US - (int16_t)(M1_CONTROL_SIGN * delta_pwm);
+    }
+
+    // Seguridad extra:
+    // si estamos intentando ir hacia negativo y el final está pulsado, paramos.
+    if (Motor1_ZeroFC_IsPressedRaw() && pwm_cmd < M1_SERVO_STOP_US)
+    {
+        Motor1_Servo_Stop();
+        Motor1_Encoder_ResetZero();
+        dbg_m1_control_pwm = M1_SERVO_STOP_US;
+        return;
+    }
+
+    Motor1_Servo_SetUs((uint16_t)pwm_cmd);
+    dbg_m1_control_pwm = (uint16_t)pwm_cmd;
+}
+
+//-----------------------------------------------------------------------
+
 
 /* USER CODE END 0 */
 
@@ -905,6 +1092,7 @@ int main(void)
   //------------------Motor M1-------------------------------------------
 
   Motor1_Servo_StartPWM();
+  Motor1_Encoder_Start();
   HAL_Delay(1000);
   Motor1_HomeZero_Start();
 
@@ -912,7 +1100,7 @@ int main(void)
 
   //-----------------------------encoder motor 1------------------------------------------
 
-  Motor1_Encoder_Start();
+
 
   //---------------------------------------------------------------------------------
 
@@ -927,9 +1115,33 @@ int main(void)
     /* USER CODE BEGIN 3 */
 
 	  //Homing_Update();
-	  Motor1_HomeZero_Update();
-	  Motor1_Encoder_Update();
 
+	  // 1) Primero homing
+	      Motor1_HomeZero_Update();
+
+	      // 2) Solo hacemos control de posición cuando el cero ya está hecho
+	      if (m1_zero_done && !m1_error)
+	      {
+	          Motor1_PositionControl_Update();
+	      }
+
+	      // 3) Prueba temporal: mandar 30 grados después del homing
+	      static uint8_t test_sent = 0;
+	      static uint32_t zero_ok_time = 0;
+
+	      if (m1_zero_done && !m1_error && test_sent == 0)
+	      {
+	          if (zero_ok_time == 0)
+	          {
+	              zero_ok_time = HAL_GetTick();
+	          }
+
+	          if ((HAL_GetTick() - zero_ok_time) > 1000)
+	          {
+	              Motor1_SetTargetDeg(30.0f);
+	              test_sent = 1;
+	          }
+	      }
 
 
   }
