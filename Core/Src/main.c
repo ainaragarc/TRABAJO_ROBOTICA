@@ -64,41 +64,47 @@ TIM_HandleTypeDef htim4;
 #define DIR_NEGATIVE            GPIO_PIN_RESET
 
 // TIM4 está en APB1. Con tu clock: APB1 timer clock = 50 MHz.
-// Prescaler = 49 -> tick de 1 MHz -> 1 us.
+// Prescaler TIM4 = 49 -> tick = 1 MHz -> 1 us.
 #define STEP_TIMER_TICK_HZ      1000000UL
 
-// Mecánica
-#define STEPS_PER_REV           200.0f
+// Full-step
+#define MICROSTEP               1.0f
+#define FULL_STEPS_PER_REV      200.0f
+#define STEPS_PER_REV           (FULL_STEPS_PER_REV * MICROSTEP)
+
+// Corredera: 8 mm por vuelta
 #define MM_PER_REV              8.0f
-#define STEPS_PER_MM            (STEPS_PER_REV / MM_PER_REV)   // 25 pasos/mm
+#define STEPS_PER_MM            (STEPS_PER_REV / MM_PER_REV)
 
-// Corredera
-#define SLIDER_LENGTH_MM        440.0f
-
-// Velocidad mínima deseada: 1 cm/s = 10 mm/s
+// Velocidad elegida
+#define BASE_SPEED_MM_S         40.0f
 #define MIN_SPEED_MM_S          10.0f
+
+volatile uint8_t stepper_is_running = 0;
+volatile uint8_t stepper_current_dir = 0;
+
+#define DIR_TO_RIGHT            1
+#define DIR_TO_LEFT             0
 
 //-----------------------------------------------------------------------
 
 
 //------------------FCs-------------------------------------------
 
-#define LIMIT_MIN_PORT          GPIOA
-#define LIMIT_MIN_PIN           GPIO_PIN_8
+// PA9 = final derecho
+// PA8 = final izquierdo
 
-#define LIMIT_MAX_PORT          GPIOA
-#define LIMIT_MAX_PIN           GPIO_PIN_9
+#define LIMIT_RIGHT_PORT        GPIOA
+#define LIMIT_RIGHT_PIN         GPIO_PIN_9
 
-volatile uint8_t limit_min_hit = 0;
-volatile uint8_t limit_max_hit = 0;
+#define LIMIT_LEFT_PORT         GPIOA
+#define LIMIT_LEFT_PIN          GPIO_PIN_8
 
-volatile uint8_t stepper_is_running = 0;
-volatile uint8_t stepper_current_dir = 0;
+volatile uint8_t limit_right_hit = 0;
+volatile uint8_t limit_left_hit = 0;
 
-// Para antirrebote básico
-volatile uint32_t last_limit_min_ms = 0;
-volatile uint32_t last_limit_max_ms = 0;
-
+volatile uint32_t last_limit_right_ms = 0;
+volatile uint32_t last_limit_left_ms = 0;
 //-----------------------------------------------------------------------
 
 
@@ -121,31 +127,28 @@ volatile int32_t dbg_enc_total = 0;
 volatile int32_t dbg_enc_mid = 0;
 volatile uint8_t dbg_homing_state = 0;
 
+volatile uint8_t dbg_limit_right = 0;
+volatile uint8_t dbg_limit_left = 0;
+
 //-----------------------------------------------------------------------
 
 //------------------Maquina estados Homing-------------------------------------------
 typedef enum
 {
     HOMING_START = 0,
-    HOMING_MOVE_TO_MIN,
-    HOMING_AT_MIN,
-    HOMING_MOVE_TO_MAX,
-    HOMING_AT_MAX,
+    HOMING_MOVE_TO_RIGHT,
+    HOMING_AT_RIGHT,
+    HOMING_MOVE_TO_LEFT,
+    HOMING_AT_LEFT,
     HOMING_MOVE_TO_MID,
     HOMING_DONE
 } HomingState;
 
+
 volatile HomingState homing_state = HOMING_START;
 
-#define BASE_SPEED_MM_S         40.0f
-
-// Según tu prueba anterior, esto debería estar así.
-// Si ves que va al lado contrario, los intercambiamos.
-#define DIR_TO_MIN              0
-#define DIR_TO_MAX              1
-
 // Margen de parada en cuentas de encoder para el punto medio.
-#define MID_TOLERANCE_COUNTS    5
+#define MID_TOLERANCE_COUNTS    10
 
 //-----------------------------------------------------------------------
 
@@ -171,7 +174,7 @@ static void MX_TIM4_Init(void);
 
 static void Stepper_Enable(void)
 {
-    // A4988: ENABLE activo en LOW
+    // A4988 ENABLE activo en LOW
     HAL_GPIO_WritePin(STEP_EN_PORT, STEP_EN_PIN, GPIO_PIN_RESET);
 }
 
@@ -250,63 +253,61 @@ static void Stepper_StopHold(void)
 
     stepper_is_running = 0;
 
-    // Mantiene par
+    // Deja el A4988 activo para mantener par
     Stepper_Enable();
 }
 
 //-----------------------------------------------------------------------
 
 //-----------------------------FCs------------------------------------------
-static uint8_t LimitMin_IsPressed(void)
+static uint8_t LimitRight_IsPressed(void)
 {
-    return (HAL_GPIO_ReadPin(LIMIT_MIN_PORT, LIMIT_MIN_PIN) == GPIO_PIN_RESET);
+    return (HAL_GPIO_ReadPin(LIMIT_RIGHT_PORT, LIMIT_RIGHT_PIN) == GPIO_PIN_RESET);
 }
 
-static uint8_t LimitMax_IsPressed(void)
+static uint8_t LimitLeft_IsPressed(void)
 {
-    return (HAL_GPIO_ReadPin(LIMIT_MAX_PORT, LIMIT_MAX_PIN) == GPIO_PIN_RESET);
+    return (HAL_GPIO_ReadPin(LIMIT_LEFT_PORT, LIMIT_LEFT_PIN) == GPIO_PIN_RESET);
 }
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
     uint32_t now = HAL_GetTick();
 
-    if (GPIO_Pin == LIMIT_MIN_PIN)
+    if (GPIO_Pin == LIMIT_RIGHT_PIN)
     {
-        if (now - last_limit_min_ms < 50)
+        if (now - last_limit_right_ms < 50)
         {
             return;
         }
 
-        last_limit_min_ms = now;
+        last_limit_right_ms = now;
 
-        if (LimitMin_IsPressed())
+        if (LimitRight_IsPressed())
         {
-            limit_min_hit = 1;
+            limit_right_hit = 1;
 
-            // Suponemos dir = 0 hacia MIN
-            if (stepper_is_running && stepper_current_dir == 0)
+            if (stepper_is_running && stepper_current_dir == DIR_TO_RIGHT)
             {
                 Stepper_StopHold();
             }
         }
     }
 
-    if (GPIO_Pin == LIMIT_MAX_PIN)
+    if (GPIO_Pin == LIMIT_LEFT_PIN)
     {
-        if (now - last_limit_max_ms < 50)
+        if (now - last_limit_left_ms < 50)
         {
             return;
         }
 
-        last_limit_max_ms = now;
+        last_limit_left_ms = now;
 
-        if (LimitMax_IsPressed())
+        if (LimitLeft_IsPressed())
         {
-            limit_max_hit = 1;
+            limit_left_hit = 1;
 
-            // Suponemos dir = 1 hacia MAX
-            if (stepper_is_running && stepper_current_dir == 1)
+            if (stepper_is_running && stepper_current_dir == DIR_TO_LEFT)
             {
                 Stepper_StopHold();
             }
@@ -341,10 +342,9 @@ static void Encoder_Update(void)
     uint16_t raw_now = (uint16_t)__HAL_TIM_GET_COUNTER(&ENC_TIM);
 
     /*
-       Resta con int16_t para gestionar automáticamente overflow de 16 bits.
-       Ejemplo:
-       65535 -> 0 cuenta como +1
-       0 -> 65535 cuenta como -1
+       TIM3 es de 16 bits. Esta resta con int16_t gestiona overflow.
+       Si pasa de 65535 a 0, delta = +1.
+       Si pasa de 0 a 65535, delta = -1.
     */
     int16_t delta = (int16_t)(raw_now - encoder_last_raw);
 
@@ -358,15 +358,27 @@ static void Encoder_Update(void)
     dbg_enc_mid = encoder_mid_counts;
 }
 
+
 //-----------------------------------------------------------------------
 
 //------------------Maquina estados Homing-------------------------------------------
+static int32_t abs32(int32_t x)
+{
+    if (x < 0)
+    {
+        return -x;
+    }
+    return x;
+}
+
 
 static void Homing_Update(void)
 {
     Encoder_Update();
 
     dbg_homing_state = (uint8_t)homing_state;
+    dbg_limit_right = LimitRight_IsPressed();
+    dbg_limit_left = LimitLeft_IsPressed();
 
     switch (homing_state)
     {
@@ -374,82 +386,101 @@ static void Homing_Update(void)
         {
             homing_done = 0;
 
-            limit_min_hit = 0;
-            limit_max_hit = 0;
+            limit_right_hit = 0;
+            limit_left_hit = 0;
 
-            Stepper_StartMmS(BASE_SPEED_MM_S, DIR_TO_MIN);
+            /*
+               Primer movimiento:
+               ir a la derecha hasta PA9.
+            */
+            Stepper_StartMmS(BASE_SPEED_MM_S, DIR_TO_RIGHT);
 
-            homing_state = HOMING_MOVE_TO_MIN;
+            homing_state = HOMING_MOVE_TO_RIGHT;
             break;
         }
 
-        case HOMING_MOVE_TO_MIN:
+        case HOMING_MOVE_TO_RIGHT:
         {
-            if (LimitMin_IsPressed() || limit_min_hit)
+            if (LimitRight_IsPressed() || limit_right_hit)
             {
                 Stepper_StopHold();
                 HAL_Delay(200);
 
+                /*
+                   PA9, final derecho, pasa a ser posición cero.
+                */
                 Encoder_ResetPosition();
 
-                limit_min_hit = 0;
-                limit_max_hit = 0;
+                limit_right_hit = 0;
+                limit_left_hit = 0;
 
-                homing_state = HOMING_AT_MIN;
+                homing_state = HOMING_AT_RIGHT;
             }
             break;
         }
 
-        case HOMING_AT_MIN:
+        case HOMING_AT_RIGHT:
         {
             HAL_Delay(300);
 
-            Stepper_StartMmS(BASE_SPEED_MM_S, DIR_TO_MAX);
+            /*
+               Desde la derecha vamos hacia la izquierda.
+               Al ir a la izquierda, el encoder decrementa.
+            */
+            Stepper_StartMmS(BASE_SPEED_MM_S, DIR_TO_LEFT);
 
-            homing_state = HOMING_MOVE_TO_MAX;
+            homing_state = HOMING_MOVE_TO_LEFT;
             break;
         }
 
-        case HOMING_MOVE_TO_MAX:
+        case HOMING_MOVE_TO_LEFT:
         {
-            if (LimitMax_IsPressed() || limit_max_hit)
+            if (LimitLeft_IsPressed() || limit_left_hit)
             {
                 Stepper_StopHold();
                 HAL_Delay(200);
 
                 Encoder_Update();
 
-                encoder_total_counts = encoder_position_counts;
-
                 /*
-                   Si el encoder cuenta negativo al ir hacia MAX,
-                   lo convertimos a positivo.
+                   Estamos en el final izquierdo.
+                   Derecha era 0.
+                   Izquierda puede ser negativa o positiva según el signo real del encoder.
                 */
-                if (encoder_total_counts < 0)
-                {
-                    encoder_total_counts = -encoder_total_counts;
-                    encoder_position_counts = encoder_total_counts;
-                }
-
+                encoder_total_counts = encoder_position_counts;
                 encoder_mid_counts = encoder_total_counts / 2;
 
-                limit_min_hit = 0;
-                limit_max_hit = 0;
+                /*
+                   Seguridad:
+                   Si el encoder apenas ha contado, algo va mal.
+                   Pero ahora miramos valor absoluto, no signo.
+                */
+                if (abs32(encoder_total_counts) < 100)
+                {
+                    Stepper_StopHold();
+                    homing_done = 0;
+                    homing_state = HOMING_DONE;
+                    break;
+                }
 
-                homing_state = HOMING_AT_MAX;
+                limit_right_hit = 0;
+                limit_left_hit = 0;
+
+                homing_state = HOMING_AT_LEFT;
             }
             break;
         }
 
-        case HOMING_AT_MAX:
+        case HOMING_AT_LEFT:
         {
             HAL_Delay(300);
 
             /*
-               Estamos en MAX y queremos ir al punto medio.
-               Por tanto, vamos hacia MIN hasta que la posición sea <= mid.
+               Estamos a la izquierda, con encoder negativo.
+               Volvemos hacia la derecha.
+               Hacia la derecha el encoder incrementa.
             */
-            Stepper_StartMmS(BASE_SPEED_MM_S, DIR_TO_MIN);
+            Stepper_StartMmS(BASE_SPEED_MM_S, DIR_TO_RIGHT);
 
             homing_state = HOMING_MOVE_TO_MID;
             break;
@@ -458,23 +489,49 @@ static void Homing_Update(void)
         case HOMING_MOVE_TO_MID:
         {
             /*
-               Caso normal:
-               MIN = 0
-               MAX = encoder_total_counts
-               vamos desde MAX hacia MID, así que encoder_position_counts baja.
-            */
-            if (encoder_position_counts <= encoder_mid_counts + MID_TOLERANCE_COUNTS)
-            {
-                Stepper_StopHold();
+               Queremos ir desde el final izquierdo hacia el punto medio.
 
-                homing_done = 1;
-                homing_state = HOMING_DONE;
+               Caso A:
+               derecha = 0
+               izquierda = -20000
+               centro = -10000
+               al ir hacia la derecha: -20000 -> -19000 -> ... -> -10000
+               condición: encoder_position_counts >= encoder_mid_counts
+
+               Caso B:
+               derecha = 0
+               izquierda = +20000
+               centro = +10000
+               al ir hacia la derecha: +20000 -> +19000 -> ... -> +10000
+               condición: encoder_position_counts <= encoder_mid_counts
+            */
+
+            if (encoder_total_counts < 0)
+            {
+                if (encoder_position_counts >= encoder_mid_counts - MID_TOLERANCE_COUNTS)
+                {
+                    Stepper_StopHold();
+
+                    homing_done = 1;
+                    homing_state = HOMING_DONE;
+                }
+            }
+            else
+            {
+                if (encoder_position_counts <= encoder_mid_counts + MID_TOLERANCE_COUNTS)
+                {
+                    Stepper_StopHold();
+
+                    homing_done = 1;
+                    homing_state = HOMING_DONE;
+                }
             }
 
             /*
-               Seguridad extra: si toca MIN antes de llegar al medio, parar.
+               Seguridad:
+               Si toca el final derecho antes de llegar al centro, paramos.
             */
-            if (LimitMin_IsPressed() || limit_min_hit)
+            if (LimitRight_IsPressed() || limit_right_hit)
             {
                 Stepper_StopHold();
 
@@ -494,6 +551,7 @@ static void Homing_Update(void)
         default:
         {
             Stepper_StopHold();
+            homing_done = 0;
             homing_state = HOMING_DONE;
             break;
         }
