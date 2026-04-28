@@ -222,11 +222,6 @@ void Encoder_Reset(void) //esta función sirve para setear el 0 del encoder dond
 //------------------------------------------------------------------------------
 
 //-------------CODIGO MOTOR 1----------------------
-
-static float last_error = 0.0f; //Variables necesarias para el PID
-static float integral = 0.0f;
-static uint32_t last_time = 0;
-
 void R1_SetVelocity(uint16_t vel)
 {
 	if (vel >= 2000) vel = 2000;
@@ -240,57 +235,34 @@ void R1_Quieto(){
 
 void R1_ControlPosition(float target_deg)
 {
-		float current = Encoder_GetDegrees();
-	    float error = target_deg - current;
+    float current = Encoder_GetDegrees();
 
-	    uint32_t now = HAL_GetTick();
-	    float dt = (now - last_time) / 1000.0f;
+    float error = target_deg - current;
 
-	    if (dt <= 0.0f)
-	        dt = 0.001f;
+    // Ganancia (ajustable)
+    float Kp = 5.0f;
 
-	    // --- PID gains ---
-	    float Kp = 5.0f;
-	    float Ki = 0.0f;
-	    float Kd = 0.0f;
+    float output = 1500 + (error * Kp);
 
-	    // --- Integral ---
-	    integral += error * dt;
+    // saturación servo
+    if (output > 2000) output = 2000;
+    if (output < 1000) output = 1000;
 
-	    // anti-windup simple
-	    if (integral > 300) integral = 300;
-	    if (integral < -300) integral = -300;
+    //Evitar vibracion
+    if (fabs(error) < 2.0f)
+    {
+        __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, 1500);
+        return;
+    }
 
-	    // --- Derivada ---
-	    float derivative = (error - last_error) / dt;
-
-	    // --- salida PID ---
-	    float output = 1500
-	                 + (Kp * error)
-	                 + (Ki * integral)
-	                 + (Kd * derivative);
-
-	    // saturación
-	    if (output > 2000) output = 2000;
-	    if (output < 1000) output = 1000;
-
-	    // zona muerta (evita vibración)
-	    if (fabs(error) < 1.5f)
-	    {
-	        output = 1500;
-	        integral = 0;
-	    }
-
-	    __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, (uint16_t)output);
-
-	    last_error = error;
-	    last_time = now;
+    __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, (uint16_t)output);
 }
 
 void R1_Homing(){
 
 }
 
+uint32_t last_control_time = 0;
 //-----------------------------------------------------
 
 /* USER CODE END 0 */
@@ -358,7 +330,7 @@ int main(void)
     /* USER CODE BEGIN 3 */
 
 
-	  Encoder_GetDegrees(); //Esto funciona a la perfeccion, necesario para el control de R1
+	  // Encoder_GetDegrees(); //Esto funciona a la perfeccion, necesario para el control de R1
 
 
 	  /*  // Sentido 1: 20 mm/s durante 3 segundos
@@ -378,7 +350,11 @@ int main(void)
 
 	  // Prueba movimientos R1
 
-	  R1_ControlPosition(90.0);
+	  if (HAL_GetTick() - last_control_time >= 5) // 5 ms
+	      {
+	          last_control_time = HAL_GetTick();
+	          R1_ControlPosition(90.0f);
+	      }
 
 
 
