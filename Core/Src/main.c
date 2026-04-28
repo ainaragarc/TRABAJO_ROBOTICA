@@ -1536,6 +1536,9 @@ int main(void)
 
 	  Motor1_Task();
 
+	  /*moverMotor2(110);
+	    moverMotor3(110);*/
+
 
   }
   /* USER CODE END 3 */
