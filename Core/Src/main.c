@@ -64,26 +64,234 @@ TIM_HandleTypeDef htim4;
 #define DIR_NEGATIVE            GPIO_PIN_RESET
 
 // TIM4 está en APB1. Con tu clock: APB1 timer clock = 50 MHz.
-// Prescaler = 49 -> tick de 1 MHz -> 1 us.
+// Prescaler TIM4 = 49 -> tick = 1 MHz -> 1 us.
 #define STEP_TIMER_TICK_HZ      1000000UL
 
-// Mecánica
-#define STEPS_PER_REV           200.0f
+// Full-step
+#define MICROSTEP               1.0f
+#define FULL_STEPS_PER_REV      200.0f
+#define STEPS_PER_REV           (FULL_STEPS_PER_REV * MICROSTEP)
+
+// Corredera: 8 mm por vuelta
 #define MM_PER_REV              8.0f
-#define STEPS_PER_MM            (STEPS_PER_REV / MM_PER_REV)   // 25 pasos/mm
+#define STEPS_PER_MM            (STEPS_PER_REV / MM_PER_REV)
 
-// Corredera
-#define SLIDER_LENGTH_MM        440.0f
-
-// Velocidad mínima deseada: 1 cm/s = 10 mm/s
+// Velocidad elegida
+#define BASE_SPEED_MM_S         40.0f
 #define MIN_SPEED_MM_S          10.0f
 
+volatile uint8_t stepper_is_running = 0;
+volatile uint8_t stepper_current_dir = 0;
 
-//-------------------------Encoder R1-----------------------------
-#define ENCODER_CPR 1440.0f
-//----------------------------------------------------------------
+#define DIR_TO_RIGHT            0
+#define DIR_TO_LEFT             1
 
 //-----------------------------------------------------------------------
+
+
+//------------------FCs-------------------------------------------
+
+// PA9 = final derecho
+// PA8 = final izquierdo
+
+#define LIMIT_RIGHT_PORT        GPIOA
+#define LIMIT_RIGHT_PIN         GPIO_PIN_9
+
+#define LIMIT_LEFT_PORT         GPIOA
+#define LIMIT_LEFT_PIN          GPIO_PIN_8
+
+volatile uint8_t limit_right_hit = 0;
+volatile uint8_t limit_left_hit = 0;
+
+volatile uint32_t last_limit_right_ms = 0;
+volatile uint32_t last_limit_left_ms = 0;
+//-----------------------------------------------------------------------
+
+
+//------------------Encoder_Base-------------------------------------------
+
+#define ENC_TIM                 htim3
+
+volatile int32_t encoder_position_counts = 0;
+static uint16_t encoder_last_raw = 0;
+
+volatile int32_t encoder_total_counts = 0;
+volatile int32_t encoder_mid_counts = 0;
+
+volatile uint8_t homing_done = 0;
+
+// Debug
+volatile uint16_t dbg_enc_raw = 0;
+volatile int32_t dbg_enc_pos = 0;
+volatile int32_t dbg_enc_total = 0;
+volatile int32_t dbg_enc_mid = 0;
+volatile uint8_t dbg_homing_state = 0;
+
+volatile uint8_t dbg_limit_right = 0;
+volatile uint8_t dbg_limit_left = 0;
+
+//-----------------------------------------------------------------------
+
+//------------------Maquina estados Homing-------------------------------------------
+typedef enum
+{
+    HOMING_START = 0,
+    HOMING_MOVE_TO_RIGHT,
+    HOMING_AT_RIGHT,
+    HOMING_MOVE_TO_LEFT,
+    HOMING_AT_LEFT,
+    HOMING_MOVE_TO_MID,
+    HOMING_DONE
+} HomingState;
+
+
+volatile HomingState homing_state = HOMING_START;
+
+// Margen de parada en cuentas de encoder para el punto medio.
+#define MID_TOLERANCE_COUNTS    10
+
+//-----------------------------------------------------------------------
+
+//------------------Motor M1 + FC-------------------------------------------
+#define M1_SERVO_TIM            htim1
+#define M1_SERVO_CHANNEL        TIM_CHANNEL_1   // Cambiar a CH2/CH3 si tu señal está en otro pin
+
+// Para esta prueba uso PA8 como final de cero.
+// Si el final de motor 1 está en otro pin, cambia estas dos líneas.
+#define M1_ZERO_FC_PORT         GPIOA
+#define M1_ZERO_FC_PIN          GPIO_PIN_10
+
+// Servo continuo: ajustar si tu servo no se queda quieto exactamente en 1500
+#define M1_SERVO_STOP_US        1500
+
+// Velocidad lenta hacia el final.
+// Si se mueve en sentido contrario al final, cambia 1420 por 1580.
+#define M1_SERVO_HOME_US        1200
+
+#define M1_SERVO_MIN_US         1000
+#define M1_SERVO_MAX_US         2000
+
+// Seguridad: si en 3 s no encuentra el final, para.
+#define M1_HOME_TIMEOUT_MS      1500
+
+// Antirrebote del final
+#define M1_FC_DEBOUNCE_MS       30
+
+typedef enum
+{
+    M1_IDLE = 0,
+    M1_HOMING,
+    M1_ZERO_OK,
+    M1_ERROR_TIMEOUT
+} Motor1State;
+
+volatile Motor1State m1_state = M1_IDLE;
+
+volatile uint8_t m1_zero_done = 0;
+volatile uint8_t m1_error = 0;
+
+volatile uint16_t dbg_m1_pwm_us = 1500;
+volatile uint8_t dbg_m1_fc_zero = 0;
+volatile uint8_t dbg_m1_state = 0;
+
+static uint32_t m1_home_start_ms = 0;
+static uint32_t m1_fc_pressed_since_ms = 0;
+
+//-----------------------------------------------------------------------
+
+//------------------------------Encoder Motor 1-----------------------------------------
+#define M1_ENC_TIM              htim2
+
+volatile int32_t m1_encoder_counts = 0;
+volatile int32_t m1_encoder_zero_counts = 0;
+
+volatile int32_t dbg_m1_enc_counts = 0;
+volatile uint32_t dbg_m1_enc_raw = 0;
+
+//-----------------------------------------------------------------------
+
+//------------------ Control posicion Motor 1 ----------------------------
+
+// IMPORTANTE:
+// Este valor hay que calibrarlo.
+// Después de hacer homing, mueve el eje hasta 180 grados físicos
+// y mira dbg_m1_enc_counts. Ese valor será M1_COUNTS_180.
+#define M1_COUNTS_180              1000.0f   // provisional, luego se cambia
+#define M1_HOME_POSITION_DEG        90.0f
+#define M1_CONTROL_PERIOD_MS       10
+
+#define M1_POS_TOLERANCE_DEG       0.8f
+#define M1_POS_RELEASE_DEG         1.8f
+
+// PWM alrededor del neutro
+#define M1_PWM_MIN_MOVE_US         45.0f
+#define M1_PWM_MAX_DELTA_US        500.0f
+
+// Ganancia proporcional: us de PWM por grado de error
+#define M1_KP_US_PER_DEG           8.0f
+
+#define M1_FAST_ERROR_DEG          15.0f
+#define M1_MEDIUM_ERROR_DEG        5.0f
+
+#define M1_PWM_FAST_DELTA_US       500.0f
+#define M1_PWM_MEDIUM_DELTA_US     280.0f
+#define M1_PWM_NEAR_DELTA_US       100.0f
+
+// Si al mandar +30 grados se mueve hacia el final PA10, cambia esto a -1
+#define M1_CONTROL_SIGN            1
+
+volatile float m1_target_deg = 0.0f;
+volatile float m1_current_deg = 0.0f;
+volatile float m1_error_deg = 0.0f;
+
+volatile uint8_t m1_position_control_enabled = 0;
+
+volatile uint16_t dbg_m1_control_pwm = 1500;
+volatile float dbg_m1_target_deg = 0.0f;
+volatile float dbg_m1_current_deg = 0.0f;
+volatile float dbg_m1_error_deg = 0.0f;
+volatile uint8_t m1_in_position = 0;
+
+//-----------------------------------------------------------------------
+
+//------------------ Servos posicionales TIM1 CH2 / CH3 ------------------
+
+#define POS_SERVO_TIM              htim1
+
+#define SERVO2_CHANNEL             TIM_CHANNEL_2
+#define SERVO3_CHANNEL             TIM_CHANNEL_3
+
+// Rango seguro inicial.
+// Si tus servos aceptan más recorrido, luego podemos probar 500-2500.
+#define POS_SERVO_MIN_US           500
+#define POS_SERVO_MAX_US           2500
+#define POS_SERVO_CENTER_US        1500
+
+#define SERVO2_HOME_DEG            90.0f
+#define SERVO3_HOME_DEG            90.0f
+
+// Límites lógicos de seguridad
+#define SERVO2_MIN_DEG             0.0f
+#define SERVO2_MAX_DEG             180.0f
+
+#define SERVO3_MIN_DEG             0.0f
+#define SERVO3_MAX_DEG             180.0f
+
+// Si alguno gira al revés físicamente, cambia su INVERT a 1
+#define SERVO2_INVERT              0
+#define SERVO3_INVERT              0
+
+volatile float servo2_target_deg = 90.0f;
+volatile float servo3_target_deg = 90.0f;
+
+volatile uint16_t dbg_servo2_pwm_us = 1500;
+volatile uint16_t dbg_servo3_pwm_us = 1500;
+
+volatile float dbg_servo2_deg = 90.0f;
+volatile float dbg_servo3_deg = 90.0f;
+
+//-----------------------------------------------------------------------
+
 
 /* USER CODE END PV */
 
@@ -96,10 +304,62 @@ static void MX_TIM3_Init(void);
 static void MX_TIM4_Init(void);
 /* USER CODE BEGIN PFP */
 
+
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+// Prototipos Motor 1 - Encoder
+static void Motor1_Encoder_Start(void);
+static void Motor1_Encoder_ResetZero(void);
+static void Motor1_Encoder_Update(void);
+
+// Prototipos Motor 1 - Servo / Homing
+static void Motor1_Servo_SetUs(uint16_t us);
+static void Motor1_Servo_Stop(void);
+static void Motor1_Servo_StartPWM(void);
+static uint8_t Motor1_ZeroFC_IsPressedRaw(void);
+static uint8_t Motor1_ZeroFC_IsPressedDebounced(void);
+static void Motor1_HomeZero_Start(void);
+static void Motor1_HomeZero_Update(void);
+
+//prototipos control
+static float Motor1_Counts_To_Deg(int32_t counts);
+static int32_t Motor1_Deg_To_Counts(float deg);
+static void Motor1_SetTargetDeg(float deg);
+static void Motor1_PositionControl_Update(void);
+
+static void Motor1_Start(void);
+static void Motor1_Task(void);
+static void Motor1_GoToDeg(float deg);
+static void Motor1_GoToZero(void);
+static void Motor1_GoTo90(void);
+static uint8_t Motor1_IsReady(void);
+static uint8_t Motor1_IsInPosition(void);
+static void Motor1_ZeroReached(void);
+
+
+// Prototipos servos posicionales TIM1 CH2 / CH3
+static float PosServo_ClampDeg(float deg, float min_deg, float max_deg);
+static uint16_t PosServo_DegToUs(float deg);
+static void PosServo_SetChannelDeg(uint32_t channel,
+                                   float deg,
+                                   float min_deg,
+                                   float max_deg,
+                                   uint8_t invert,
+                                   volatile float *dbg_deg,
+                                   volatile uint16_t *dbg_pwm_us);
+
+static void PosServos_Start(void);
+static void PosServos_Home90(void);
+
+static void Servo2_SetDeg(float deg);
+static void Servo3_SetDeg(float deg);
+static void Servo2_Home90(void);
+static void Servo3_Home90(void);
+
 
 //-----------------------------stepper------------------------------------------
 
@@ -144,14 +404,8 @@ static void Stepper_SetSpeedStepsPerSec(uint32_t steps_per_sec)
         return;
     }
 
-    /*
-       Timer tick = 1 us.
-       Frecuencia STEP = steps_per_sec.
-       Periodo_us = 1 000 000 / steps_per_sec.
-    */
     uint32_t period_us = STEP_TIMER_TICK_HZ / steps_per_sec;
 
-    // Seguridad básica: no generar pulsos excesivamente rápidos.
     if (period_us < 20)
     {
         period_us = 20;
@@ -170,6 +424,9 @@ static void Stepper_StartStepsPerSec(uint32_t steps_per_sec, uint8_t dir)
     Stepper_SetDir(dir);
     Stepper_SetSpeedStepsPerSec(steps_per_sec);
 
+    stepper_current_dir = dir;
+    stepper_is_running = 1;
+
     Stepper_Enable();
 
     HAL_TIM_PWM_Start(&STEP_TIM, STEP_TIM_CHANNEL);
@@ -185,83 +442,907 @@ static void Stepper_StopHold(void)
 {
     HAL_TIM_PWM_Stop(&STEP_TIM, STEP_TIM_CHANNEL);
 
-    // Mantiene el driver activado para que el motor tenga par de mantenimiento.
+    stepper_is_running = 0;
+
+    // Deja el A4988 activo para mantener par
     Stepper_Enable();
-}
-
-static void Stepper_StopFree(void)
-{
-    HAL_TIM_PWM_Stop(&STEP_TIM, STEP_TIM_CHANNEL);
-
-    // Desactiva el driver: el motor queda libre.
-    Stepper_Disable();
 }
 
 //-----------------------------------------------------------------------
 
-//-------------------Código Encoder Motor 1 -----------------------------------
-volatile float resultado = 0;
-
-int32_t Encoder_Get(void)
+//-----------------------------FCs------------------------------------------
+static uint8_t LimitRight_IsPressed(void)
 {
-    return (int32_t)__HAL_TIM_GET_COUNTER(&htim2);
+    return (HAL_GPIO_ReadPin(LIMIT_RIGHT_PORT, LIMIT_RIGHT_PIN) == GPIO_PIN_RESET);
 }
 
-float Encoder_GetDegrees(void)
+static uint8_t LimitLeft_IsPressed(void)
 {
-    int32_t count = __HAL_TIM_GET_COUNTER(&htim2);
-    resultado = (count * 360.0f) / ENCODER_CPR;
-
-    return resultado;
-}
-void Encoder_Reset(void) //esta función sirve para setear el 0 del encoder donde queramos que al ser incremental lo podemos poner dnd queramos. --> Se necesitará un homing supongo
-{
-    __HAL_TIM_SET_COUNTER(&htim2, 0);
+    return (HAL_GPIO_ReadPin(LIMIT_LEFT_PORT, LIMIT_LEFT_PIN) == GPIO_PIN_RESET);
 }
 
-//------------------------------------------------------------------------------
-
-//-------------CODIGO MOTOR 1----------------------
-void R1_SetVelocity(uint16_t vel)
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
-	if (vel >= 2000) vel = 2000;
-	if (vel <= 1000) vel = 1000;
-    __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, vel);
-}
+    uint32_t now = HAL_GetTick();
 
-void R1_Quieto(){
-	R1_SetVelocity(1500);
-}
-
-void R1_ControlPosition(float target_deg)
-{
-    float current = Encoder_GetDegrees();
-
-    float error = target_deg - current;
-
-    // Ganancia (ajustable)
-    float Kp = 5.0f;
-
-    float output = 1500 + (error * Kp);
-
-    // saturación servo
-    if (output > 2000) output = 2000;
-    if (output < 1000) output = 1000;
-
-    //Evitar vibracion
-    if (fabs(error) < 2.0f)
+    if (GPIO_Pin == LIMIT_RIGHT_PIN)
     {
-        __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, 1500);
+        if (now - last_limit_right_ms < 50)
+        {
+            return;
+        }
+
+        last_limit_right_ms = now;
+
+        if (LimitRight_IsPressed())
+        {
+            limit_right_hit = 1;
+
+            if (stepper_is_running && stepper_current_dir == DIR_TO_RIGHT)
+            {
+                Stepper_StopHold();
+            }
+        }
+    }
+
+    if (GPIO_Pin == LIMIT_LEFT_PIN)
+    {
+        if (now - last_limit_left_ms < 50)
+        {
+            return;
+        }
+
+        last_limit_left_ms = now;
+
+        if (LimitLeft_IsPressed())
+        {
+            limit_left_hit = 1;
+
+            if (stepper_is_running && stepper_current_dir == DIR_TO_LEFT)
+            {
+                Stepper_StopHold();
+            }
+        }
+    }
+}
+
+
+//-----------------------------------------------------------------------
+
+//------------------Encoder_Base-------------------------------------------
+static void Encoder_Start(void)
+{
+    HAL_TIM_Encoder_Start(&ENC_TIM, TIM_CHANNEL_ALL);
+
+    __HAL_TIM_SET_COUNTER(&ENC_TIM, 0);
+
+    encoder_last_raw = 0;
+    encoder_position_counts = 0;
+}
+
+static void Encoder_ResetPosition(void)
+{
+    __HAL_TIM_SET_COUNTER(&ENC_TIM, 0);
+
+    encoder_last_raw = 0;
+    encoder_position_counts = 0;
+}
+
+static void Encoder_Update(void)
+{
+    uint16_t raw_now = (uint16_t)__HAL_TIM_GET_COUNTER(&ENC_TIM);
+
+    /*
+       TIM3 es de 16 bits. Esta resta con int16_t gestiona overflow.
+       Si pasa de 65535 a 0, delta = +1.
+       Si pasa de 0 a 65535, delta = -1.
+    */
+    int16_t delta = (int16_t)(raw_now - encoder_last_raw);
+
+    encoder_last_raw = raw_now;
+
+    encoder_position_counts += delta;
+
+    dbg_enc_raw = raw_now;
+    dbg_enc_pos = encoder_position_counts;
+    dbg_enc_total = encoder_total_counts;
+    dbg_enc_mid = encoder_mid_counts;
+}
+
+
+//-----------------------------------------------------------------------
+
+//------------------Maquina estados Homing-------------------------------------------
+static int32_t abs32(int32_t x)
+{
+    if (x < 0)
+    {
+        return -x;
+    }
+    return x;
+}
+
+
+static void Homing_Update(void)
+{
+    Encoder_Update();
+
+    dbg_homing_state = (uint8_t)homing_state;
+    dbg_limit_right = LimitRight_IsPressed();
+    dbg_limit_left = LimitLeft_IsPressed();
+
+    switch (homing_state)
+    {
+        case HOMING_START:
+        {
+            homing_done = 0;
+
+            limit_right_hit = 0;
+            limit_left_hit = 0;
+
+            /*
+               Primer movimiento:
+               ir a la derecha hasta PA9.
+            */
+            Stepper_StartMmS(BASE_SPEED_MM_S, DIR_TO_RIGHT);
+
+            homing_state = HOMING_MOVE_TO_RIGHT;
+            break;
+        }
+
+        case HOMING_MOVE_TO_RIGHT:
+        {
+            if (LimitRight_IsPressed() || limit_right_hit)
+            {
+                Stepper_StopHold();
+                HAL_Delay(200);
+
+                /*
+                   PA9, final derecho, pasa a ser posición cero.
+                */
+                Encoder_ResetPosition();
+
+                limit_right_hit = 0;
+                limit_left_hit = 0;
+
+                homing_state = HOMING_AT_RIGHT;
+            }
+            break;
+        }
+
+        case HOMING_AT_RIGHT:
+        {
+            HAL_Delay(300);
+
+            /*
+               Desde la derecha vamos hacia la izquierda.
+               Al ir a la izquierda, el encoder decrementa.
+            */
+            Stepper_StartMmS(BASE_SPEED_MM_S, DIR_TO_LEFT);
+
+            homing_state = HOMING_MOVE_TO_LEFT;
+            break;
+        }
+
+        case HOMING_MOVE_TO_LEFT:
+        {
+            if (LimitLeft_IsPressed() || limit_left_hit)
+            {
+                Stepper_StopHold();
+                HAL_Delay(200);
+
+                Encoder_Update();
+
+                /*
+                   Estamos en el final izquierdo.
+                   Derecha era 0.
+                   Izquierda puede ser negativa o positiva según el signo real del encoder.
+                */
+                encoder_total_counts = encoder_position_counts;
+                encoder_mid_counts = encoder_total_counts / 2;
+
+                /*
+                   Seguridad:
+                   Si el encoder apenas ha contado, algo va mal.
+                   Pero ahora miramos valor absoluto, no signo.
+                */
+                if (abs32(encoder_total_counts) < 100)
+                {
+                    Stepper_StopHold();
+                    homing_done = 0;
+                    homing_state = HOMING_DONE;
+                    break;
+                }
+
+                limit_right_hit = 0;
+                limit_left_hit = 0;
+
+                homing_state = HOMING_AT_LEFT;
+            }
+            break;
+        }
+
+        case HOMING_AT_LEFT:
+        {
+            HAL_Delay(300);
+
+            /*
+               Estamos a la izquierda, con encoder negativo.
+               Volvemos hacia la derecha.
+               Hacia la derecha el encoder incrementa.
+            */
+            Stepper_StartMmS(BASE_SPEED_MM_S, DIR_TO_RIGHT);
+
+            homing_state = HOMING_MOVE_TO_MID;
+            break;
+        }
+
+        case HOMING_MOVE_TO_MID:
+        {
+            /*
+               Queremos ir desde el final izquierdo hacia el punto medio.
+
+               Caso A:
+               derecha = 0
+               izquierda = -20000
+               centro = -10000
+               al ir hacia la derecha: -20000 -> -19000 -> ... -> -10000
+               condición: encoder_position_counts >= encoder_mid_counts
+
+               Caso B:
+               derecha = 0
+               izquierda = +20000
+               centro = +10000
+               al ir hacia la derecha: +20000 -> +19000 -> ... -> +10000
+               condición: encoder_position_counts <= encoder_mid_counts
+            */
+
+            if (encoder_total_counts < 0)
+            {
+                if (encoder_position_counts >= encoder_mid_counts - MID_TOLERANCE_COUNTS)
+                {
+                    Stepper_StopHold();
+
+                    homing_done = 1;
+                    homing_state = HOMING_DONE;
+                }
+            }
+            else
+            {
+                if (encoder_position_counts <= encoder_mid_counts + MID_TOLERANCE_COUNTS)
+                {
+                    Stepper_StopHold();
+
+                    homing_done = 1;
+                    homing_state = HOMING_DONE;
+                }
+            }
+
+            /*
+               Seguridad:
+               Si toca el final derecho antes de llegar al centro, paramos.
+            */
+            if (LimitRight_IsPressed() || limit_right_hit)
+            {
+                Stepper_StopHold();
+
+                homing_done = 0;
+                homing_state = HOMING_DONE;
+            }
+
+            break;
+        }
+
+        case HOMING_DONE:
+        {
+            Stepper_StopHold();
+            break;
+        }
+
+        default:
+        {
+            Stepper_StopHold();
+            homing_done = 0;
+            homing_state = HOMING_DONE;
+            break;
+        }
+    }
+}
+
+//-----------------------------------------------------------------------
+
+//------------------ Motor 1: servo continuo + FC cero ------------------
+
+static void Motor1_Servo_SetUs(uint16_t us)
+{
+    if (us < M1_SERVO_MIN_US)
+    {
+        us = M1_SERVO_MIN_US;
+    }
+
+    if (us > M1_SERVO_MAX_US)
+    {
+        us = M1_SERVO_MAX_US;
+    }
+
+    __HAL_TIM_SET_COMPARE(&M1_SERVO_TIM, M1_SERVO_CHANNEL, us);
+
+    dbg_m1_pwm_us = us;
+}
+
+static void Motor1_Servo_Stop(void)
+{
+    Motor1_Servo_SetUs(M1_SERVO_STOP_US);
+}
+
+static void Motor1_Servo_StartPWM(void)
+{
+    HAL_TIM_PWM_Start(&M1_SERVO_TIM, M1_SERVO_CHANNEL);
+
+    // Muy importante: al arrancar, servo parado.
+    Motor1_Servo_Stop();
+}
+
+static uint8_t Motor1_ZeroFC_IsPressedRaw(void)
+{
+    // Final con pull-up: pulsado = LOW
+    return (HAL_GPIO_ReadPin(M1_ZERO_FC_PORT, M1_ZERO_FC_PIN) == GPIO_PIN_RESET);
+}
+
+static uint8_t Motor1_ZeroFC_IsPressedDebounced(void)
+{
+    uint32_t now = HAL_GetTick();
+
+    if (Motor1_ZeroFC_IsPressedRaw())
+    {
+        if (m1_fc_pressed_since_ms == 0)
+        {
+            m1_fc_pressed_since_ms = now;
+        }
+
+        if ((now - m1_fc_pressed_since_ms) >= M1_FC_DEBOUNCE_MS)
+        {
+            return 1;
+        }
+    }
+    else
+    {
+        m1_fc_pressed_since_ms = 0;
+    }
+
+    return 0;
+}
+
+static void Motor1_HomeZero_Start(void)
+{
+    m1_zero_done = 0;
+    m1_error = 0;
+    m1_fc_pressed_since_ms = 0;
+    m1_in_position = 0;
+
+    // Por seguridad, antes de empezar, servo parado
+    Motor1_Servo_Stop();
+
+    // Si al arrancar ya está pisando el final PA10,
+    // esa posición es directamente el cero físico.
+    if (Motor1_ZeroFC_IsPressedRaw())
+    {
+        Motor1_ZeroReached();
         return;
     }
 
-    __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, (uint16_t)output);
+    // Si no está en el final, empezamos búsqueda de cero
+    m1_home_start_ms = HAL_GetTick();
+
+    // Movimiento hacia el final de carrera PA10
+    Motor1_Servo_SetUs(M1_SERVO_HOME_US);
+
+    m1_state = M1_HOMING;
 }
 
-void R1_Homing(){
+static void Motor1_HomeZero_Update(void)
+{
+    uint32_t now = HAL_GetTick();
 
+    dbg_m1_fc_zero = Motor1_ZeroFC_IsPressedRaw();
+    dbg_m1_state = (uint8_t)m1_state;
+
+    switch (m1_state)
+    {
+        case M1_IDLE:
+        {
+            Motor1_Servo_Stop();
+            break;
+        }
+
+        case M1_HOMING:
+        {
+        	if (Motor1_ZeroFC_IsPressedDebounced())
+        	{
+        		Motor1_ZeroReached();
+        	    break;
+        	}
+
+            if ((now - m1_home_start_ms) > M1_HOME_TIMEOUT_MS)
+            {
+                Motor1_Servo_Stop();
+
+                m1_zero_done = 0;
+                m1_error = 1;
+                m1_state = M1_ERROR_TIMEOUT;
+                break;
+            }
+
+            break;
+        }
+
+        case M1_ZERO_OK:
+        {
+
+            break;
+        }
+
+        case M1_ERROR_TIMEOUT:
+        {
+            Motor1_Servo_Stop();
+            break;
+        }
+
+        default:
+        {
+            Motor1_Servo_Stop();
+
+            m1_zero_done = 0;
+            m1_error = 1;
+            m1_state = M1_ERROR_TIMEOUT;
+            break;
+        }
+    }
 }
-//-----------------------------------------------------
+
+//-----------------------------------------------------------------------
+
+//------------------ Encoder Motor 1 ------------------------------------
+
+static void Motor1_Encoder_Start(void)
+{
+    HAL_TIM_Encoder_Start(&M1_ENC_TIM, TIM_CHANNEL_ALL);
+
+    __HAL_TIM_SET_COUNTER(&M1_ENC_TIM, 0);
+
+    m1_encoder_counts = 0;
+    m1_encoder_zero_counts = 0;
+
+    dbg_m1_enc_counts = 0;
+    dbg_m1_enc_raw = 0;
+}
+
+static void Motor1_Encoder_ResetZero(void)
+{
+    __HAL_TIM_SET_COUNTER(&M1_ENC_TIM, 0);
+
+    m1_encoder_counts = 0;
+    m1_encoder_zero_counts = 0;
+
+    dbg_m1_enc_counts = 0;
+    dbg_m1_enc_raw = 0;
+}
+
+static void Motor1_Encoder_Update(void)
+{
+    uint32_t raw = __HAL_TIM_GET_COUNTER(&M1_ENC_TIM);
+
+    /*
+       TIM2 es de 32 bits.
+
+       Si el encoder va en sentido positivo:
+       raw = 0, 1, 2, 3...
+
+       Si va en sentido negativo desde cero:
+       raw = 0xFFFFFFFF, 0xFFFFFFFE...
+       Al convertirlo a int32_t se convierte en -1, -2...
+    */
+    m1_encoder_counts = (int32_t)raw;
+
+    dbg_m1_enc_raw = raw;
+    dbg_m1_enc_counts = m1_encoder_counts;
+}
+
+//-----------------------------------------------------------------------
+
+//------------------ Control posicion Motor 1 ----------------------------
+
+static float Motor1_Counts_To_Deg(int32_t counts)
+{
+    return ((float)counts * 180.0f) / M1_COUNTS_180;
+}
+
+static int32_t Motor1_Deg_To_Counts(float deg)
+{
+    return (int32_t)((deg * M1_COUNTS_180) / 180.0f);
+}
+
+static void Motor1_SetTargetDeg(float deg)
+{
+    if (deg < 0.0f)
+    {
+        deg = 0.0f;
+    }
+
+    if (deg > 180.0f)
+    {
+        deg = 180.0f;
+    }
+
+    m1_target_deg = deg;
+    m1_position_control_enabled = 1;
+
+    // Nuevo objetivo: salimos del estado "ya estoy en posición"
+    m1_in_position = 0;
+
+    dbg_m1_target_deg = m1_target_deg;
+}
+
+static void Motor1_PositionControl_Update(void)
+{
+    static uint32_t last_control_ms = 0;
+
+    uint32_t now = HAL_GetTick();
+
+    if ((now - last_control_ms) < M1_CONTROL_PERIOD_MS)
+    {
+        return;
+    }
+
+    last_control_ms = now;
+
+    // Si estamos haciendo homing, el control de posición no debe tocar el servo
+    if (m1_state == M1_HOMING)
+    {
+        return;
+    }
+
+    // Si no se ha hecho cero todavía, no dejamos controlar posición
+    if (!m1_zero_done || m1_error)
+    {
+        Motor1_Servo_Stop();
+        m1_position_control_enabled = 0;
+        dbg_m1_control_pwm = M1_SERVO_STOP_US;
+        return;
+    }
+
+    // Si el control no está activado, servo parado
+    if (!m1_position_control_enabled)
+    {
+        Motor1_Servo_Stop();
+        dbg_m1_control_pwm = M1_SERVO_STOP_US;
+        return;
+    }
+
+    // Actualizamos encoder y calculamos posición
+    Motor1_Encoder_Update();
+
+    m1_current_deg = Motor1_Counts_To_Deg(m1_encoder_counts);
+    m1_error_deg = m1_target_deg - m1_current_deg;
+
+    dbg_m1_current_deg = m1_current_deg;
+    dbg_m1_error_deg = m1_error_deg;
+    dbg_m1_target_deg = m1_target_deg;
+
+    // Seguridad de cero:
+    // Si toca el final PA10, esa posición vuelve a ser cero absoluto.
+    if (Motor1_ZeroFC_IsPressedRaw())
+    {
+        Motor1_Encoder_ResetZero();
+
+        m1_current_deg = 0.0f;
+        m1_error_deg = m1_target_deg - m1_current_deg;
+
+        dbg_m1_current_deg = m1_current_deg;
+        dbg_m1_error_deg = m1_error_deg;
+
+        // Si el objetivo era cerca de cero, nos quedamos parados
+        if (m1_target_deg <= 1.0f)
+        {
+            m1_in_position = 1;
+
+            Motor1_Servo_Stop();
+            dbg_m1_control_pwm = M1_SERVO_STOP_US;
+            return;
+        }
+    }
+
+    float abs_error = fabsf(m1_error_deg);
+
+    // Histéresis estrecha:
+    // Si ya está en posición, no corrige mientras siga dentro del margen pequeño.
+    if (m1_in_position)
+    {
+        if (abs_error < M1_POS_RELEASE_DEG)
+        {
+            Motor1_Servo_Stop();
+            dbg_m1_control_pwm = M1_SERVO_STOP_US;
+            return;
+        }
+        else
+        {
+            m1_in_position = 0;
+        }
+    }
+
+    // Entramos en posición cuando estamos suficientemente cerca
+    if (abs_error <= M1_POS_TOLERANCE_DEG)
+    {
+        m1_in_position = 1;
+
+        Motor1_Servo_Stop();
+        dbg_m1_control_pwm = M1_SERVO_STOP_US;
+        return;
+    }
+
+    float delta_pwm = 0.0f;
+
+    /*
+       Control por zonas:
+
+       - Lejos del objetivo: fuerza alta, para que suba bien.
+       - Zona media: fuerza intermedia.
+       - Cerca del objetivo: corrección pequeña, para reducir la amplitud de oscilación.
+    */
+
+    if (abs_error >= M1_FAST_ERROR_DEG)
+    {
+        // Lejos: mantiene fuerza alta
+        delta_pwm = M1_PWM_FAST_DELTA_US;
+    }
+    else if (abs_error >= M1_MEDIUM_ERROR_DEG)
+    {
+        // Zona media
+        delta_pwm = M1_PWM_MEDIUM_DELTA_US;
+    }
+    else
+    {
+        // Cerca del objetivo: corrección proporcional limitada
+        delta_pwm = M1_KP_US_PER_DEG * abs_error;
+
+        if (delta_pwm < M1_PWM_MIN_MOVE_US)
+        {
+            delta_pwm = M1_PWM_MIN_MOVE_US;
+        }
+
+        if (delta_pwm > M1_PWM_NEAR_DELTA_US)
+        {
+            delta_pwm = M1_PWM_NEAR_DELTA_US;
+        }
+    }
+
+    int16_t pwm_cmd = M1_SERVO_STOP_US;
+
+    if (m1_error_deg > 0.0f)
+    {
+        pwm_cmd = M1_SERVO_STOP_US + (int16_t)(M1_CONTROL_SIGN * delta_pwm);
+    }
+    else
+    {
+        pwm_cmd = M1_SERVO_STOP_US - (int16_t)(M1_CONTROL_SIGN * delta_pwm);
+    }
+
+    // Limitamos por seguridad
+    if (pwm_cmd < M1_SERVO_MIN_US)
+    {
+        pwm_cmd = M1_SERVO_MIN_US;
+    }
+
+    if (pwm_cmd > M1_SERVO_MAX_US)
+    {
+        pwm_cmd = M1_SERVO_MAX_US;
+    }
+
+    // Seguridad extra:
+    // En tu montaje, ir hacia el final PA10 es PWM menor que STOP.
+    if (Motor1_ZeroFC_IsPressedRaw() && pwm_cmd < M1_SERVO_STOP_US)
+    {
+        Motor1_Servo_Stop();
+        Motor1_Encoder_ResetZero();
+
+        m1_current_deg = 0.0f;
+        m1_error_deg = m1_target_deg;
+
+        dbg_m1_current_deg = m1_current_deg;
+        dbg_m1_error_deg = m1_error_deg;
+        dbg_m1_control_pwm = M1_SERVO_STOP_US;
+
+        return;
+    }
+
+    Motor1_Servo_SetUs((uint16_t)pwm_cmd);
+    dbg_m1_control_pwm = (uint16_t)pwm_cmd;
+}
+
+static uint8_t Motor1_IsReady(void)
+{
+    return (m1_zero_done && !m1_error);
+}
+
+static uint8_t Motor1_IsInPosition(void)
+{
+    return (Motor1_IsReady() && m1_in_position);
+}
+
+static void Motor1_GoToDeg(float deg)
+{
+    if (!Motor1_IsReady())
+    {
+        return;
+    }
+
+    Motor1_SetTargetDeg(deg);
+}
+
+static void Motor1_GoToZero(void)
+{
+    Motor1_GoToDeg(0.0f);
+}
+
+static void Motor1_GoTo90(void)
+{
+    Motor1_GoToDeg(90.0f);
+}
+
+static void Motor1_Start(void)
+{
+    Motor1_Servo_StartPWM();
+    Motor1_Encoder_Start();
+
+    HAL_Delay(1000);
+
+    Motor1_HomeZero_Start();
+}
+
+static void Motor1_Task(void)
+{
+    Motor1_HomeZero_Update();
+
+    if (Motor1_IsReady())
+    {
+        Motor1_PositionControl_Update();
+    }
+}
+
+static void Motor1_ZeroReached(void)
+{
+    Motor1_Servo_Stop();
+
+    // Esta posición física es 0 grados reales
+    Motor1_Encoder_ResetZero();
+
+    m1_zero_done = 1;
+    m1_error = 0;
+    m1_state = M1_ZERO_OK;
+
+    // Homing final: después de encontrar 0°, ir a 90°
+    Motor1_SetTargetDeg(M1_HOME_POSITION_DEG);
+}
+
+//-----------------------------------------------------------------------
+
+//------------------ Servos posicionales TIM1 CH2 / CH3 ------------------
+
+static float PosServo_ClampDeg(float deg, float min_deg, float max_deg)
+{
+    if (deg < min_deg)
+    {
+        deg = min_deg;
+    }
+
+    if (deg > max_deg)
+    {
+        deg = max_deg;
+    }
+
+    return deg;
+}
+
+static uint16_t PosServo_DegToUs(float deg)
+{
+    if (deg < 0.0f)
+    {
+        deg = 0.0f;
+    }
+
+    if (deg > 180.0f)
+    {
+        deg = 180.0f;
+    }
+
+    float us = (float)POS_SERVO_MIN_US +
+               ((float)(POS_SERVO_MAX_US - POS_SERVO_MIN_US) * deg / 180.0f);
+
+    return (uint16_t)(us + 0.5f);
+}
+
+static void PosServo_SetChannelDeg(uint32_t channel,
+                                   float deg,
+                                   float min_deg,
+                                   float max_deg,
+                                   uint8_t invert,
+                                   volatile float *dbg_deg,
+                                   volatile uint16_t *dbg_pwm_us)
+{
+    float logical_deg = PosServo_ClampDeg(deg, min_deg, max_deg);
+
+    float pwm_deg = logical_deg;
+
+    if (invert)
+    {
+        pwm_deg = 180.0f - logical_deg;
+    }
+
+    uint16_t pwm_us = PosServo_DegToUs(pwm_deg);
+
+    __HAL_TIM_SET_COMPARE(&POS_SERVO_TIM, channel, pwm_us);
+
+    *dbg_deg = logical_deg;
+    *dbg_pwm_us = pwm_us;
+}
+
+static void Servo2_SetDeg(float deg)
+{
+    servo2_target_deg = PosServo_ClampDeg(deg, SERVO2_MIN_DEG, SERVO2_MAX_DEG);
+
+    PosServo_SetChannelDeg(SERVO2_CHANNEL,
+                           servo2_target_deg,
+                           SERVO2_MIN_DEG,
+                           SERVO2_MAX_DEG,
+                           SERVO2_INVERT,
+                           &dbg_servo2_deg,
+                           &dbg_servo2_pwm_us);
+}
+
+static void Servo3_SetDeg(float deg)
+{
+    servo3_target_deg = PosServo_ClampDeg(deg, SERVO3_MIN_DEG, SERVO3_MAX_DEG);
+
+    PosServo_SetChannelDeg(SERVO3_CHANNEL,
+                           servo3_target_deg,
+                           SERVO3_MIN_DEG,
+                           SERVO3_MAX_DEG,
+                           SERVO3_INVERT,
+                           &dbg_servo3_deg,
+                           &dbg_servo3_pwm_us);
+}
+
+static void Servo2_Home90(void)
+{
+    Servo2_SetDeg(SERVO2_HOME_DEG);
+}
+
+static void Servo3_Home90(void)
+{
+    Servo3_SetDeg(SERVO3_HOME_DEG);
+}
+
+static void PosServos_Home90(void)
+{
+    Servo2_Home90();
+    Servo3_Home90();
+}
+
+static void PosServos_Start(void)
+{
+    // Ponemos primero el pulso de centro antes de arrancar PWM
+    __HAL_TIM_SET_COMPARE(&POS_SERVO_TIM, SERVO2_CHANNEL, POS_SERVO_CENTER_US);
+    __HAL_TIM_SET_COMPARE(&POS_SERVO_TIM, SERVO3_CHANNEL, POS_SERVO_CENTER_US);
+
+    HAL_TIM_PWM_Start(&POS_SERVO_TIM, SERVO2_CHANNEL);
+    HAL_TIM_PWM_Start(&POS_SERVO_TIM, SERVO3_CHANNEL);
+
+    // Homing lógico a 90 grados
+    PosServos_Home90();
+}
+
+//-----------------------------------------------------------------------
+
 
 /* USER CODE END 0 */
 
@@ -298,8 +1379,6 @@ int main(void)
   MX_TIM2_Init();
   MX_TIM3_Init();
   MX_TIM4_Init();
-
-  HAL_TIM_Encoder_Start(&htim2, TIM_CHANNEL_ALL);
   /* USER CODE BEGIN 2 */
 
   //-----------------------------stepper------------------------------------------
@@ -307,15 +1386,41 @@ int main(void)
   Stepper_Disable();
   HAL_Delay(1000);
 
-  Stepper_Enable();
+  //Stepper_Enable();
 
 
-  // --------------------------encoder R1------------------------------------
-  Encoder_Reset();
-  //-------------------------------------------------------------------------
+  //---------------------------------------------------------------------------------
 
-//---------------------------------------------------------------------------------
+  //-----------------------------encoder base------------------------------------------
 
+  Encoder_Start();
+
+  //---------------------------------------------------------------------------------
+
+  //------------------Maquina estados Homing-------------------------------------------
+
+  //homing_state = HOMING_START;
+  //homing_done = 0;
+
+
+  //---------------------------------------------------------------------------------
+
+  //------------------Motor M1-------------------------------------------
+
+  //Motor1_Servo_StartPWM();
+ // Motor1_Encoder_Start();
+ // HAL_Delay(1000);
+  //Motor1_HomeZero_Start();
+
+  Motor1_Start();
+
+  //---------------------------------------------------------------------------------
+
+  //-----------------------------servos posicionales------------------------------------------
+
+  PosServos_Start();
+
+  //---------------------------------------------------------------------------------
 
   /* USER CODE END 2 */
 
@@ -327,31 +1432,9 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
 
+	  Homing_Update();
 
-	  // Encoder_GetDegrees(); //Esto funciona a la perfeccion, necesario para el control de R1
-
-
-	  /*  // Sentido 1: 20 mm/s durante 3 segundos
-	     Stepper_StartMmS(40.0f, 1);
-	     HAL_Delay(2000);
-
-	     Stepper_StopHold();
-	     HAL_Delay(1000);
-
-	     // Sentido 2: 20 mm/s durante 3 segundos
-	     Stepper_StartMmS(40.0f, 0);
-	     HAL_Delay(2000);
-
-	     Stepper_StopHold();
-	     HAL_Delay(1000);
-	  */
-
-	  // Prueba movimientos R1
-
-
-	  R1_ControlPosition(90.0f);
-
-
+	  Motor1_Task();
 
 
   }
@@ -511,15 +1594,15 @@ static void MX_TIM2_Init(void)
   htim2.Init.Period = 4294967295;
   htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
-  sConfig.EncoderMode = TIM_ENCODERMODE_TI12;
+  sConfig.EncoderMode = TIM_ENCODERMODE_TI1;
   sConfig.IC1Polarity = TIM_ICPOLARITY_RISING;
   sConfig.IC1Selection = TIM_ICSELECTION_DIRECTTI;
   sConfig.IC1Prescaler = TIM_ICPSC_DIV1;
-  sConfig.IC1Filter = 0;
+  sConfig.IC1Filter = 8;
   sConfig.IC2Polarity = TIM_ICPOLARITY_RISING;
   sConfig.IC2Selection = TIM_ICSELECTION_DIRECTTI;
   sConfig.IC2Prescaler = TIM_ICPSC_DIV1;
-  sConfig.IC2Filter = 0;
+  sConfig.IC2Filter = 8;
   if (HAL_TIM_Encoder_Init(&htim2, &sConfig) != HAL_OK)
   {
     Error_Handler();
@@ -564,7 +1647,7 @@ static void MX_TIM3_Init(void)
   sConfig.IC1Polarity = TIM_ICPOLARITY_RISING;
   sConfig.IC1Selection = TIM_ICSELECTION_DIRECTTI;
   sConfig.IC1Prescaler = TIM_ICPSC_DIV1;
-  sConfig.IC1Filter = 0;
+  sConfig.IC1Filter = 8;
   sConfig.IC2Polarity = TIM_ICPOLARITY_RISING;
   sConfig.IC2Selection = TIM_ICSELECTION_DIRECTTI;
   sConfig.IC2Prescaler = TIM_ICPSC_DIV1;
@@ -661,9 +1744,15 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : PA8 PA9 */
-  GPIO_InitStruct.Pin = GPIO_PIN_8|GPIO_PIN_9;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  /*Configure GPIO pins : FC_Izquierda_Pin FC_Derecha_Pin */
+  GPIO_InitStruct.Pin = FC_Izquierda_Pin|FC_Derecha_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : PA10 */
+  GPIO_InitStruct.Pin = GPIO_PIN_10;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
