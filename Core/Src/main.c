@@ -46,6 +46,7 @@ TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim3;
 TIM_HandleTypeDef htim4;
+TIM_HandleTypeDef htim8;
 
 /* USER CODE BEGIN PV */
 
@@ -292,6 +293,29 @@ volatile float dbg_servo3_deg = 90.0f;
 
 //-----------------------------------------------------------------------
 
+//------------------ Servo pequeño TIM8 CH1 ------------------
+
+#define SMALL_SERVO_TIM              htim8
+#define SMALL_SERVO_CHANNEL          TIM_CHANNEL_1
+
+#define SMALL_SERVO_MIN_US           500
+#define SMALL_SERVO_MAX_US           2500
+#define SMALL_SERVO_CENTER_US        1500
+
+#define SMALL_SERVO_HOME_DEG         90.0f
+
+#define SMALL_SERVO_MIN_DEG          0.0f
+#define SMALL_SERVO_MAX_DEG          180.0f
+
+// Si gira al revés, cambiar a 1
+#define SMALL_SERVO_INVERT           0
+
+volatile float small_servo_target_deg = 90.0f;
+volatile float dbg_small_servo_deg = 90.0f;
+volatile uint16_t dbg_small_servo_pwm_us = 1500;
+
+//-----------------------------------------------------------------------
+
 
 /* USER CODE END PV */
 
@@ -302,6 +326,7 @@ static void MX_TIM1_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_TIM3_Init(void);
 static void MX_TIM4_Init(void);
+static void MX_TIM8_Init(void);
 /* USER CODE BEGIN PFP */
 
 
@@ -359,6 +384,12 @@ static void Servo2_SetDeg(float deg);
 static void Servo3_SetDeg(float deg);
 static void Servo2_Home90(void);
 static void Servo3_Home90(void);
+
+// Prototipos servo pequeño TIM8 CH1
+static uint16_t SmallServo_DegToUs(float deg);
+static void SmallServo_Start(void);
+static void SmallServo_SetDeg(float deg);
+static void SmallServo_Home90(void);
 
 
 //-----------------------------stepper------------------------------------------
@@ -1343,6 +1374,73 @@ static void PosServos_Start(void)
 
 //-----------------------------------------------------------------------
 
+//------------------ Servo pequeño TIM8 CH1 ------------------
+
+static uint16_t SmallServo_DegToUs(float deg)
+{
+    if (deg < 0.0f)
+    {
+        deg = 0.0f;
+    }
+
+    if (deg > 180.0f)
+    {
+        deg = 180.0f;
+    }
+
+    float us = (float)SMALL_SERVO_MIN_US +
+               ((float)(SMALL_SERVO_MAX_US - SMALL_SERVO_MIN_US) * deg / 180.0f);
+
+    return (uint16_t)(us + 0.5f);
+}
+
+static void SmallServo_SetDeg(float deg)
+{
+    if (deg < SMALL_SERVO_MIN_DEG)
+    {
+        deg = SMALL_SERVO_MIN_DEG;
+    }
+
+    if (deg > SMALL_SERVO_MAX_DEG)
+    {
+        deg = SMALL_SERVO_MAX_DEG;
+    }
+
+    small_servo_target_deg = deg;
+
+    float pwm_deg = deg;
+
+    if (SMALL_SERVO_INVERT)
+    {
+        pwm_deg = 180.0f - deg;
+    }
+
+    uint16_t pwm_us = SmallServo_DegToUs(pwm_deg);
+
+    __HAL_TIM_SET_COMPARE(&SMALL_SERVO_TIM, SMALL_SERVO_CHANNEL, pwm_us);
+
+    dbg_small_servo_deg = deg;
+    dbg_small_servo_pwm_us = pwm_us;
+}
+
+static void SmallServo_Home90(void)
+{
+    SmallServo_SetDeg(SMALL_SERVO_HOME_DEG);
+}
+
+static void SmallServo_Start(void)
+{
+    // Centro antes de arrancar PWM
+    __HAL_TIM_SET_COMPARE(&SMALL_SERVO_TIM, SMALL_SERVO_CHANNEL, SMALL_SERVO_CENTER_US);
+
+    HAL_TIM_PWM_Start(&SMALL_SERVO_TIM, SMALL_SERVO_CHANNEL);
+
+    // Homing lógico a 90 grados
+    SmallServo_Home90();
+}
+
+//-----------------------------------------------------------------------
+
 
 /* USER CODE END 0 */
 
@@ -1379,6 +1477,7 @@ int main(void)
   MX_TIM2_Init();
   MX_TIM3_Init();
   MX_TIM4_Init();
+  MX_TIM8_Init();
   /* USER CODE BEGIN 2 */
 
   //-----------------------------stepper------------------------------------------
@@ -1419,6 +1518,7 @@ int main(void)
   //-----------------------------servos posicionales------------------------------------------
 
   PosServos_Start();
+  SmallServo_Start();
 
   //---------------------------------------------------------------------------------
 
@@ -1718,6 +1818,71 @@ static void MX_TIM4_Init(void)
 }
 
 /**
+  * @brief TIM8 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM8_Init(void)
+{
+
+  /* USER CODE BEGIN TIM8_Init 0 */
+
+  /* USER CODE END TIM8_Init 0 */
+
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+  TIM_OC_InitTypeDef sConfigOC = {0};
+  TIM_BreakDeadTimeConfigTypeDef sBreakDeadTimeConfig = {0};
+
+  /* USER CODE BEGIN TIM8_Init 1 */
+
+  /* USER CODE END TIM8_Init 1 */
+  htim8.Instance = TIM8;
+  htim8.Init.Prescaler = 99;
+  htim8.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim8.Init.Period = 19999;
+  htim8.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim8.Init.RepetitionCounter = 0;
+  htim8.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_PWM_Init(&htim8) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim8, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sConfigOC.OCMode = TIM_OCMODE_PWM1;
+  sConfigOC.Pulse = 0;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCNPolarity = TIM_OCNPOLARITY_HIGH;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  sConfigOC.OCIdleState = TIM_OCIDLESTATE_RESET;
+  sConfigOC.OCNIdleState = TIM_OCNIDLESTATE_RESET;
+  if (HAL_TIM_PWM_ConfigChannel(&htim8, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sBreakDeadTimeConfig.OffStateRunMode = TIM_OSSR_DISABLE;
+  sBreakDeadTimeConfig.OffStateIDLEMode = TIM_OSSI_DISABLE;
+  sBreakDeadTimeConfig.LockLevel = TIM_LOCKLEVEL_OFF;
+  sBreakDeadTimeConfig.DeadTime = 0;
+  sBreakDeadTimeConfig.BreakState = TIM_BREAK_DISABLE;
+  sBreakDeadTimeConfig.BreakPolarity = TIM_BREAKPOLARITY_HIGH;
+  sBreakDeadTimeConfig.AutomaticOutput = TIM_AUTOMATICOUTPUT_DISABLE;
+  if (HAL_TIMEx_ConfigBreakDeadTime(&htim8, &sBreakDeadTimeConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM8_Init 2 */
+
+  /* USER CODE END TIM8_Init 2 */
+  HAL_TIM_MspPostInit(&htim8);
+
+}
+
+/**
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
@@ -1733,6 +1898,7 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOE_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
+  __HAL_RCC_GPIOC_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOB, EN_Pin|DIR_Pin|ENABLE_Pin, GPIO_PIN_RESET);
