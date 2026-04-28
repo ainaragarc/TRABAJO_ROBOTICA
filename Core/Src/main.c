@@ -261,8 +261,6 @@ void R1_ControlPosition(float target_deg)
 void R1_Homing(){
 
 }
-
-uint32_t last_control_time = 0;
 //-----------------------------------------------------
 
 /* USER CODE END 0 */
@@ -350,11 +348,9 @@ int main(void)
 
 	  // Prueba movimientos R1
 
-	  if (HAL_GetTick() - last_control_time >= 5) // 5 ms
-	      {
-	          last_control_time = HAL_GetTick();
-	          R1_ControlPosition(90.0f);
-	      }
+
+	  R1_ControlPosition(90.0f);
+
 
 
 
