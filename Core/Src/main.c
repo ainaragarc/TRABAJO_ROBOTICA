@@ -254,6 +254,45 @@ volatile uint8_t m1_in_position = 0;
 
 //-----------------------------------------------------------------------
 
+//------------------ Servos posicionales TIM1 CH2 / CH3 ------------------
+
+#define POS_SERVO_TIM              htim1
+
+#define SERVO2_CHANNEL             TIM_CHANNEL_2
+#define SERVO3_CHANNEL             TIM_CHANNEL_3
+
+// Rango seguro inicial.
+// Si tus servos aceptan más recorrido, luego podemos probar 500-2500.
+#define POS_SERVO_MIN_US           500
+#define POS_SERVO_MAX_US           2500
+#define POS_SERVO_CENTER_US        1500
+
+#define SERVO2_HOME_DEG            90.0f
+#define SERVO3_HOME_DEG            90.0f
+
+// Límites lógicos de seguridad
+#define SERVO2_MIN_DEG             0.0f
+#define SERVO2_MAX_DEG             180.0f
+
+#define SERVO3_MIN_DEG             0.0f
+#define SERVO3_MAX_DEG             180.0f
+
+// Si alguno gira al revés físicamente, cambia su INVERT a 1
+#define SERVO2_INVERT              0
+#define SERVO3_INVERT              0
+
+volatile float servo2_target_deg = 90.0f;
+volatile float servo3_target_deg = 90.0f;
+
+volatile uint16_t dbg_servo2_pwm_us = 1500;
+volatile uint16_t dbg_servo3_pwm_us = 1500;
+
+volatile float dbg_servo2_deg = 90.0f;
+volatile float dbg_servo3_deg = 90.0f;
+
+//-----------------------------------------------------------------------
+
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -300,6 +339,27 @@ static void Motor1_GoTo90(void);
 static uint8_t Motor1_IsReady(void);
 static uint8_t Motor1_IsInPosition(void);
 static void Motor1_ZeroReached(void);
+
+
+// Prototipos servos posicionales TIM1 CH2 / CH3
+static float PosServo_ClampDeg(float deg, float min_deg, float max_deg);
+static uint16_t PosServo_DegToUs(float deg);
+static void PosServo_SetChannelDeg(uint32_t channel,
+                                   float deg,
+                                   float min_deg,
+                                   float max_deg,
+                                   uint8_t invert,
+                                   volatile float *dbg_deg,
+                                   volatile uint16_t *dbg_pwm_us);
+
+static void PosServos_Start(void);
+static void PosServos_Home90(void);
+
+static void Servo2_SetDeg(float deg);
+static void Servo3_SetDeg(float deg);
+static void Servo2_Home90(void);
+static void Servo3_Home90(void);
+
 
 //-----------------------------stepper------------------------------------------
 
@@ -1166,6 +1226,123 @@ static void Motor1_ZeroReached(void)
 
 //-----------------------------------------------------------------------
 
+//------------------ Servos posicionales TIM1 CH2 / CH3 ------------------
+
+static float PosServo_ClampDeg(float deg, float min_deg, float max_deg)
+{
+    if (deg < min_deg)
+    {
+        deg = min_deg;
+    }
+
+    if (deg > max_deg)
+    {
+        deg = max_deg;
+    }
+
+    return deg;
+}
+
+static uint16_t PosServo_DegToUs(float deg)
+{
+    if (deg < 0.0f)
+    {
+        deg = 0.0f;
+    }
+
+    if (deg > 180.0f)
+    {
+        deg = 180.0f;
+    }
+
+    float us = (float)POS_SERVO_MIN_US +
+               ((float)(POS_SERVO_MAX_US - POS_SERVO_MIN_US) * deg / 180.0f);
+
+    return (uint16_t)(us + 0.5f);
+}
+
+static void PosServo_SetChannelDeg(uint32_t channel,
+                                   float deg,
+                                   float min_deg,
+                                   float max_deg,
+                                   uint8_t invert,
+                                   volatile float *dbg_deg,
+                                   volatile uint16_t *dbg_pwm_us)
+{
+    float logical_deg = PosServo_ClampDeg(deg, min_deg, max_deg);
+
+    float pwm_deg = logical_deg;
+
+    if (invert)
+    {
+        pwm_deg = 180.0f - logical_deg;
+    }
+
+    uint16_t pwm_us = PosServo_DegToUs(pwm_deg);
+
+    __HAL_TIM_SET_COMPARE(&POS_SERVO_TIM, channel, pwm_us);
+
+    *dbg_deg = logical_deg;
+    *dbg_pwm_us = pwm_us;
+}
+
+static void Servo2_SetDeg(float deg)
+{
+    servo2_target_deg = PosServo_ClampDeg(deg, SERVO2_MIN_DEG, SERVO2_MAX_DEG);
+
+    PosServo_SetChannelDeg(SERVO2_CHANNEL,
+                           servo2_target_deg,
+                           SERVO2_MIN_DEG,
+                           SERVO2_MAX_DEG,
+                           SERVO2_INVERT,
+                           &dbg_servo2_deg,
+                           &dbg_servo2_pwm_us);
+}
+
+static void Servo3_SetDeg(float deg)
+{
+    servo3_target_deg = PosServo_ClampDeg(deg, SERVO3_MIN_DEG, SERVO3_MAX_DEG);
+
+    PosServo_SetChannelDeg(SERVO3_CHANNEL,
+                           servo3_target_deg,
+                           SERVO3_MIN_DEG,
+                           SERVO3_MAX_DEG,
+                           SERVO3_INVERT,
+                           &dbg_servo3_deg,
+                           &dbg_servo3_pwm_us);
+}
+
+static void Servo2_Home90(void)
+{
+    Servo2_SetDeg(SERVO2_HOME_DEG);
+}
+
+static void Servo3_Home90(void)
+{
+    Servo3_SetDeg(SERVO3_HOME_DEG);
+}
+
+static void PosServos_Home90(void)
+{
+    Servo2_Home90();
+    Servo3_Home90();
+}
+
+static void PosServos_Start(void)
+{
+    // Ponemos primero el pulso de centro antes de arrancar PWM
+    __HAL_TIM_SET_COMPARE(&POS_SERVO_TIM, SERVO2_CHANNEL, POS_SERVO_CENTER_US);
+    __HAL_TIM_SET_COMPARE(&POS_SERVO_TIM, SERVO3_CHANNEL, POS_SERVO_CENTER_US);
+
+    HAL_TIM_PWM_Start(&POS_SERVO_TIM, SERVO2_CHANNEL);
+    HAL_TIM_PWM_Start(&POS_SERVO_TIM, SERVO3_CHANNEL);
+
+    // Homing lógico a 90 grados
+    PosServos_Home90();
+}
+
+//-----------------------------------------------------------------------
+
 
 /* USER CODE END 0 */
 
@@ -1239,9 +1416,9 @@ int main(void)
 
   //---------------------------------------------------------------------------------
 
-  //-----------------------------encoder motor 1------------------------------------------
+  //-----------------------------servos posicionales------------------------------------------
 
-
+  PosServos_Start();
 
   //---------------------------------------------------------------------------------
 
