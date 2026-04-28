@@ -218,7 +218,7 @@ volatile uint32_t dbg_m1_enc_raw = 0;
 // Después de hacer homing, mueve el eje hasta 180 grados físicos
 // y mira dbg_m1_enc_counts. Ese valor será M1_COUNTS_180.
 #define M1_COUNTS_180              1000.0f   // provisional, luego se cambia
-#define M1_HOME_POSITION_DEG        90.0f
+#define M1_HOME_POSITION_DEG        50.0f
 #define M1_CONTROL_PERIOD_MS       10
 
 #define M1_POS_TOLERANCE_DEG       0.8f
@@ -657,54 +657,44 @@ static void Homing_Update(void)
 
         case HOMING_MOVE_TO_LEFT:
         {
-            if (LimitLeft_IsPressed() || limit_left_hit)
-            {
-                Stepper_StopHold();
-                HAL_Delay(200);
+        	if (LimitLeft_IsPressed() || limit_left_hit)
+        	    {
+        	        Stepper_StopHold();
+        	        HAL_Delay(200);
 
-                Encoder_Update();
+        	        Encoder_Update();
 
-                /*
-                   Estamos en el final izquierdo.
-                   Derecha era 0.
-                   Izquierda puede ser negativa o positiva según el signo real del encoder.
-                */
-                encoder_total_counts = encoder_position_counts;
-                encoder_mid_counts = encoder_total_counts / 2;
+        	        /*
+        	           Estamos en el final izquierdo.
+        	           Derecha era 0.
+        	           Izquierda puede ser negativa o positiva según el signo real del encoder.
+        	        */
+        	        encoder_total_counts = encoder_position_counts;
+        	        encoder_mid_counts = encoder_total_counts / 2;
 
-                /*
-                   Seguridad:
-                   Si el encoder apenas ha contado, algo va mal.
-                   Pero ahora miramos valor absoluto, no signo.
-                */
-                if (abs32(encoder_total_counts) < 100)
-                {
-                    Stepper_StopHold();
-                    homing_done = 0;
-                    homing_state = HOMING_DONE;
-                    break;
-                }
+        	        limit_right_hit = 0;
+        	        limit_left_hit = 0;
 
-                limit_right_hit = 0;
-                limit_left_hit = 0;
-
-                homing_state = HOMING_AT_LEFT;
-            }
+        	        homing_state = HOMING_AT_LEFT;
+        	    }
             break;
         }
 
         case HOMING_AT_LEFT:
         {
-            HAL_Delay(300);
+        	HAL_Delay(300);
 
-            /*
-               Estamos a la izquierda, con encoder negativo.
-               Volvemos hacia la derecha.
-               Hacia la derecha el encoder incrementa.
-            */
-            Stepper_StartMmS(BASE_SPEED_MM_S, DIR_TO_RIGHT);
+        	    limit_right_hit = 0;
+        	    limit_left_hit = 0;
 
-            homing_state = HOMING_MOVE_TO_MID;
+        	    /*
+        	       Estamos a la izquierda.
+        	       Volvemos hacia la derecha para ir al centro.
+        	    */
+        	    Stepper_StartMmS(BASE_SPEED_MM_S, DIR_TO_RIGHT);
+
+        	    homing_state = HOMING_MOVE_TO_MID;
+        	    break;
             break;
         }
 
@@ -1511,14 +1501,14 @@ int main(void)
  // HAL_Delay(1000);
   //Motor1_HomeZero_Start();
 
-  Motor1_Start();
+  //Motor1_Start();
 
   //---------------------------------------------------------------------------------
 
   //-----------------------------servos posicionales------------------------------------------
 
-  PosServos_Start();
-  SmallServo_Start();
+  //PosServos_Start();
+  //SmallServo_Start();
 
   //---------------------------------------------------------------------------------
 
@@ -1532,13 +1522,203 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
 
-	  Homing_Update();
 
-	  Motor1_Task();
+	  static uint8_t motores_arrancados = 0;
+	      static uint8_t etapa_robot = 0;
 
+	      static uint32_t m1_homing_ok_time = 0;
+	      static uint32_t primera_pos_ok_time = 0;
+	      static uint32_t m1_adelante_ok_time = 0;
+	      static uint32_t corredera_start_time = 0;
 
-  }
+	      /*
+	         1) HOMING DE LA CORREDERA
+
+	         Ejecutamos Homing_Update() hasta que realmente llegue a HOMING_DONE.
+	         Después NO lo seguimos llamando, porque HOMING_DONE hace Stepper_StopHold().
+	      */
+	      if (homing_state != HOMING_DONE)
+	      {
+	          Homing_Update();
+	      }
+	      else
+	      {
+	          Encoder_Update();
+
+	          dbg_homing_state = (uint8_t)homing_state;
+	          dbg_limit_right = LimitRight_IsPressed();
+	          dbg_limit_left = LimitLeft_IsPressed();
+	      }
+
+	      /*
+	         2) CUANDO TERMINA EL HOMING DE LA CORREDERA,
+	            ARRANCAMOS LOS SERVOS Y M1 UNA SOLA VEZ.
+	      */
+	      if ((homing_state == HOMING_DONE) && homing_done && !motores_arrancados)
+	      {
+	          PosServos_Start();
+	          SmallServo_Start();
+	          Motor1_Start();
+
+	          motores_arrancados = 1;
+	      }
+
+	      /*
+	         3) M1 SE ACTUALIZA SIEMPRE DESPUÉS DE ARRANCARLO
+	      */
+	      if (motores_arrancados)
+	      {
+	          Motor1_Task();
+	      }
+
+	      /*
+	         4) SECUENCIA DEL ROBOT
+	      */
+	      if (motores_arrancados)
+	      {
+	          switch (etapa_robot)
+	          {
+	              case 0:
+	              {
+	                  /*
+	                     Esperamos a que M1 haya hecho su homing.
+	                     Luego dejamos 2 segundos para que llegue aprox. a 90º.
+	                  */
+	                  if (m1_zero_done && !m1_error)
+	                  {
+	                      if (m1_homing_ok_time == 0)
+	                      {
+	                          m1_homing_ok_time = HAL_GetTick();
+	                      }
+
+	                      if ((HAL_GetTick() - m1_homing_ok_time) > 2000)
+	                      {
+	                          // PRIMERA POSICIÓN
+	                          Motor1_GoToDeg(30.0f);
+	                          Servo2_SetDeg(75.0f);
+	                          Servo3_SetDeg(160.0f);
+	                          SmallServo_SetDeg(90.0f);
+
+	                          etapa_robot = 1;
+	                      }
+	                  }
+	                  else
+	                  {
+	                      m1_homing_ok_time = 0;
+	                  }
+
+	                  break;
+	              }
+
+	              case 1:
+	              {
+	                  /*
+	                     Esperamos a que M1 esté cerca de 30º.
+	                  */
+	                  if (fabsf(m1_current_deg - 30.0f) < 4.0f)
+	                  {
+	                      if (primera_pos_ok_time == 0)
+	                      {
+	                          primera_pos_ok_time = HAL_GetTick();
+	                      }
+
+	                      if ((HAL_GetTick() - primera_pos_ok_time) > 1000)
+	                      {
+	                          // M1 se acerca
+	                          Motor1_GoToDeg(80.0f);
+
+	                          etapa_robot = 2;
+	                      }
+	                  }
+	                  else
+	                  {
+	                      primera_pos_ok_time = 0;
+	                  }
+
+	                  break;
+	              }
+
+	              case 2:
+	              {
+	                  /*
+	                     Esperamos a que M1 esté cerca de 80º.
+	                  */
+	                  if (fabsf(m1_current_deg - 80.0f) < 5.0f)
+	                  {
+	                      if (m1_adelante_ok_time == 0)
+	                      {
+	                          m1_adelante_ok_time = HAL_GetTick();
+	                      }
+
+	                      if ((HAL_GetTick() - m1_adelante_ok_time) > 1000)
+	                      {
+	                          /*
+	                             Mover corredera 5 cm a la derecha.
+
+	                             5 cm = 50 mm.
+	                             BASE_SPEED_MM_S está en mm/s.
+	                          */
+	                          limit_right_hit = 0;
+	                          limit_left_hit = 0;
+
+	                          Stepper_StartMmS(BASE_SPEED_MM_S, DIR_TO_RIGHT);
+
+	                          corredera_start_time = HAL_GetTick();
+
+	                          etapa_robot = 3;
+	                      }
+	                  }
+	                  else
+	                  {
+	                      m1_adelante_ok_time = 0;
+	                  }
+
+	                  break;
+	              }
+
+	              case 3:
+	              {
+	                  uint32_t tiempo_5cm_ms = (uint32_t)((50.0f / BASE_SPEED_MM_S) * 1000.0f);
+
+	                  /*
+	                     Paramos la corredera si:
+	                     - ha pasado el tiempo equivalente a 5 cm
+	                     - o toca final derecho por seguridad
+	                  */
+	                  if (((HAL_GetTick() - corredera_start_time) >= tiempo_5cm_ms) ||
+	                      LimitRight_IsPressed() ||
+	                      limit_right_hit)
+	                  {
+	                      Stepper_StopHold();
+
+	                      // Después de mover la corredera, M1 vuelve a 30º
+	                      Motor1_GoToDeg(30.0f);
+
+	                      etapa_robot = 4;
+	                  }
+
+	                  break;
+	              }
+
+	              case 4:
+	              {
+	                  /*
+	                     Secuencia terminada.
+	                     M1 mantiene 30º.
+	                     Corredera parada.
+	                  */
+	                  break;
+	              }
+
+	              default:
+	              {
+	                  etapa_robot = 4;
+	                  break;
+	              }
+	          }
+	      }
   /* USER CODE END 3 */
+}
 }
 
 /**
