@@ -152,6 +152,66 @@ volatile HomingState homing_state = HOMING_START;
 
 //-----------------------------------------------------------------------
 
+//------------------Motor M1 + FC-------------------------------------------
+#define M1_SERVO_TIM            htim1
+#define M1_SERVO_CHANNEL        TIM_CHANNEL_1   // Cambiar a CH2/CH3 si tu señal está en otro pin
+
+// Para esta prueba uso PA8 como final de cero.
+// Si el final de motor 1 está en otro pin, cambia estas dos líneas.
+#define M1_ZERO_FC_PORT         GPIOA
+#define M1_ZERO_FC_PIN          GPIO_PIN_10
+
+// Servo continuo: ajustar si tu servo no se queda quieto exactamente en 1500
+#define M1_SERVO_STOP_US        1500
+
+// Velocidad lenta hacia el final.
+// Si se mueve en sentido contrario al final, cambia 1420 por 1580.
+#define M1_SERVO_HOME_US        1200
+
+#define M1_SERVO_MIN_US         1000
+#define M1_SERVO_MAX_US         2000
+
+// Seguridad: si en 3 s no encuentra el final, para.
+#define M1_HOME_TIMEOUT_MS      1500
+
+// Antirrebote del final
+#define M1_FC_DEBOUNCE_MS       30
+
+typedef enum
+{
+    M1_IDLE = 0,
+    M1_HOMING,
+    M1_ZERO_OK,
+    M1_ERROR_TIMEOUT
+} Motor1State;
+
+volatile Motor1State m1_state = M1_IDLE;
+
+volatile uint8_t m1_zero_done = 0;
+volatile uint8_t m1_error = 0;
+
+volatile uint16_t dbg_m1_pwm_us = 1500;
+volatile uint8_t dbg_m1_fc_zero = 0;
+volatile uint8_t dbg_m1_state = 0;
+
+static uint32_t m1_home_start_ms = 0;
+static uint32_t m1_fc_pressed_since_ms = 0;
+
+//-----------------------------------------------------------------------
+
+//------------------------------Encoder Motor 1-----------------------------------------
+#define M1_ENC_TIM              htim2
+
+volatile int32_t m1_encoder_counts = 0;
+volatile int32_t m1_encoder_zero_counts = 0;
+
+volatile int32_t dbg_m1_enc_counts = 0;
+volatile uint32_t dbg_m1_enc_raw = 0;
+
+//-----------------------------------------------------------------------
+
+
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -169,6 +229,20 @@ static void MX_TIM4_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+// Prototipos Motor 1 - Encoder
+static void Motor1_Encoder_Start(void);
+static void Motor1_Encoder_ResetZero(void);
+static void Motor1_Encoder_Update(void);
+
+// Prototipos Motor 1 - Servo / Homing
+static void Motor1_Servo_SetUs(uint16_t us);
+static void Motor1_Servo_Stop(void);
+static void Motor1_Servo_StartPWM(void);
+static uint8_t Motor1_ZeroFC_IsPressedRaw(void);
+static uint8_t Motor1_ZeroFC_IsPressedDebounced(void);
+static void Motor1_HomeZero_Start(void);
+static void Motor1_HomeZero_Update(void);
 
 //-----------------------------stepper------------------------------------------
 
@@ -560,6 +634,212 @@ static void Homing_Update(void)
 
 //-----------------------------------------------------------------------
 
+//------------------ Motor 1: servo continuo + FC cero ------------------
+
+static void Motor1_Servo_SetUs(uint16_t us)
+{
+    if (us < M1_SERVO_MIN_US)
+    {
+        us = M1_SERVO_MIN_US;
+    }
+
+    if (us > M1_SERVO_MAX_US)
+    {
+        us = M1_SERVO_MAX_US;
+    }
+
+    __HAL_TIM_SET_COMPARE(&M1_SERVO_TIM, M1_SERVO_CHANNEL, us);
+
+    dbg_m1_pwm_us = us;
+}
+
+static void Motor1_Servo_Stop(void)
+{
+    Motor1_Servo_SetUs(M1_SERVO_STOP_US);
+}
+
+static void Motor1_Servo_StartPWM(void)
+{
+    HAL_TIM_PWM_Start(&M1_SERVO_TIM, M1_SERVO_CHANNEL);
+
+    // Muy importante: al arrancar, servo parado.
+    Motor1_Servo_Stop();
+}
+
+static uint8_t Motor1_ZeroFC_IsPressedRaw(void)
+{
+    // Final con pull-up: pulsado = LOW
+    return (HAL_GPIO_ReadPin(M1_ZERO_FC_PORT, M1_ZERO_FC_PIN) == GPIO_PIN_RESET);
+}
+
+static uint8_t Motor1_ZeroFC_IsPressedDebounced(void)
+{
+    uint32_t now = HAL_GetTick();
+
+    if (Motor1_ZeroFC_IsPressedRaw())
+    {
+        if (m1_fc_pressed_since_ms == 0)
+        {
+            m1_fc_pressed_since_ms = now;
+        }
+
+        if ((now - m1_fc_pressed_since_ms) >= M1_FC_DEBOUNCE_MS)
+        {
+            return 1;
+        }
+    }
+    else
+    {
+        m1_fc_pressed_since_ms = 0;
+    }
+
+    return 0;
+}
+
+static void Motor1_HomeZero_Start(void)
+{
+    m1_zero_done = 0;
+    m1_error = 0;
+    m1_fc_pressed_since_ms = 0;
+
+    // Si ya está pisando el final, NO empujamos más.
+    if (Motor1_ZeroFC_IsPressedDebounced() || Motor1_ZeroFC_IsPressedRaw())
+    {
+        Motor1_Servo_Stop();
+
+        // Más adelante aquí resetearemos encoder a 0.
+        // Encoder_ResetPosition();
+
+        m1_zero_done = 1;
+        m1_state = M1_ZERO_OK;
+        return;
+    }
+
+    m1_home_start_ms = HAL_GetTick();
+
+    // Movimiento lento hacia el final.
+    Motor1_Servo_SetUs(M1_SERVO_HOME_US);
+
+    m1_state = M1_HOMING;
+}
+
+static void Motor1_HomeZero_Update(void)
+{
+    uint32_t now = HAL_GetTick();
+
+    dbg_m1_fc_zero = Motor1_ZeroFC_IsPressedRaw();
+    dbg_m1_state = (uint8_t)m1_state;
+
+    switch (m1_state)
+    {
+        case M1_IDLE:
+        {
+            Motor1_Servo_Stop();
+            break;
+        }
+
+        case M1_HOMING:
+        {
+        	if (Motor1_ZeroFC_IsPressedDebounced())
+        	{
+        	    Motor1_Servo_Stop();
+
+        	    // Esta posición física pasa a ser 0 grados reales
+        	    Motor1_Encoder_ResetZero();
+
+        	    m1_zero_done = 1;
+        	    m1_error = 0;
+        	    m1_state = M1_ZERO_OK;
+        	    break;
+        	}
+
+            if ((now - m1_home_start_ms) > M1_HOME_TIMEOUT_MS)
+            {
+                Motor1_Servo_Stop();
+
+                m1_zero_done = 0;
+                m1_error = 1;
+                m1_state = M1_ERROR_TIMEOUT;
+                break;
+            }
+
+            break;
+        }
+
+        case M1_ZERO_OK:
+        {
+            Motor1_Servo_Stop();
+            break;
+        }
+
+        case M1_ERROR_TIMEOUT:
+        {
+            Motor1_Servo_Stop();
+            break;
+        }
+
+        default:
+        {
+            Motor1_Servo_Stop();
+
+            m1_zero_done = 0;
+            m1_error = 1;
+            m1_state = M1_ERROR_TIMEOUT;
+            break;
+        }
+    }
+}
+
+//-----------------------------------------------------------------------
+
+//------------------ Encoder Motor 1 ------------------------------------
+
+static void Motor1_Encoder_Start(void)
+{
+    HAL_TIM_Encoder_Start(&M1_ENC_TIM, TIM_CHANNEL_ALL);
+
+    __HAL_TIM_SET_COUNTER(&M1_ENC_TIM, 0);
+
+    m1_encoder_counts = 0;
+    m1_encoder_zero_counts = 0;
+
+    dbg_m1_enc_counts = 0;
+    dbg_m1_enc_raw = 0;
+}
+
+static void Motor1_Encoder_ResetZero(void)
+{
+    __HAL_TIM_SET_COUNTER(&M1_ENC_TIM, 0);
+
+    m1_encoder_counts = 0;
+    m1_encoder_zero_counts = 0;
+
+    dbg_m1_enc_counts = 0;
+    dbg_m1_enc_raw = 0;
+}
+
+static void Motor1_Encoder_Update(void)
+{
+    uint32_t raw = __HAL_TIM_GET_COUNTER(&M1_ENC_TIM);
+
+    /*
+       TIM2 es de 32 bits.
+
+       Si el encoder va en sentido positivo:
+       raw = 0, 1, 2, 3...
+
+       Si va en sentido negativo desde cero:
+       raw = 0xFFFFFFFF, 0xFFFFFFFE...
+       Al convertirlo a int32_t se convierte en -1, -2...
+    */
+    m1_encoder_counts = (int32_t)raw;
+
+    dbg_m1_enc_raw = raw;
+    dbg_m1_enc_counts = m1_encoder_counts;
+}
+
+//-----------------------------------------------------------------------
+
 
 /* USER CODE END 0 */
 
@@ -603,12 +883,12 @@ int main(void)
   Stepper_Disable();
   HAL_Delay(1000);
 
-  Stepper_Enable();
+  //Stepper_Enable();
 
 
   //---------------------------------------------------------------------------------
 
-  //-----------------------------stepper------------------------------------------
+  //-----------------------------encoder base------------------------------------------
 
   Encoder_Start();
 
@@ -616,12 +896,25 @@ int main(void)
 
   //------------------Maquina estados Homing-------------------------------------------
 
-  homing_state = HOMING_START;
-  homing_done = 0;
+  //homing_state = HOMING_START;
+  //homing_done = 0;
 
 
   //---------------------------------------------------------------------------------
 
+  //------------------Motor M1-------------------------------------------
+
+  Motor1_Servo_StartPWM();
+  HAL_Delay(1000);
+  Motor1_HomeZero_Start();
+
+  //---------------------------------------------------------------------------------
+
+  //-----------------------------encoder motor 1------------------------------------------
+
+  Motor1_Encoder_Start();
+
+  //---------------------------------------------------------------------------------
 
   /* USER CODE END 2 */
 
@@ -633,66 +926,10 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
 
-	  Homing_Update();
-/*
-	  limit_min_hit = 0;
-	     limit_max_hit = 0;
+	  //Homing_Update();
+	  Motor1_HomeZero_Update();
+	  Motor1_Encoder_Update();
 
-	     // Mover hacia un lado
-	     Stepper_StartMmS(40.0f, 0);
-
-	     while (!limit_min_hit)
-	     {
-	         // seguridad extra por polling
-	         if (LimitMin_IsPressed())
-	         {
-	             limit_min_hit = 1;
-	             Stepper_StopHold();
-	             break;
-	         }
-	     }
-
-	     Stepper_StopHold();
-	     HAL_Delay(1000);
-
-	     limit_min_hit = 0;
-	     limit_max_hit = 0;
-
-	     // Mover hacia el otro lado
-	     Stepper_StartMmS(40.0f, 1);
-
-	     while (!limit_max_hit)
-	     {
-	         // seguridad extra por polling
-	         if (LimitMax_IsPressed())
-	         {
-	             limit_max_hit = 1;
-	             Stepper_StopHold();
-	             break;
-	         }
-	     }
-
-	     Stepper_StopHold();
-	     HAL_Delay(1000);
-
-*/
-//------------------------------------------------
-/*
-
-	  // Sentido 1: 20 mm/s durante 3 segundos
-	     Stepper_StartMmS(40.0f, 1);
-	     HAL_Delay(2000);
-
-	     Stepper_StopHold();
-	     HAL_Delay(1000);
-
-	     // Sentido 2: 20 mm/s durante 3 segundos
-	     Stepper_StartMmS(40.0f, 0);
-	     HAL_Delay(2000);
-
-	     Stepper_StopHold();
-	     HAL_Delay(1000);
-*/
 
 
   }
@@ -856,7 +1093,7 @@ static void MX_TIM2_Init(void)
   sConfig.IC1Polarity = TIM_ICPOLARITY_RISING;
   sConfig.IC1Selection = TIM_ICSELECTION_DIRECTTI;
   sConfig.IC1Prescaler = TIM_ICPSC_DIV1;
-  sConfig.IC1Filter = 0;
+  sConfig.IC1Filter = 8;
   sConfig.IC2Polarity = TIM_ICPOLARITY_RISING;
   sConfig.IC2Selection = TIM_ICSELECTION_DIRECTTI;
   sConfig.IC2Prescaler = TIM_ICPSC_DIV1;
@@ -1005,6 +1242,12 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pins : FC_Izquierda_Pin FC_Derecha_Pin */
   GPIO_InitStruct.Pin = FC_Izquierda_Pin|FC_Derecha_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : PA10 */
+  GPIO_InitStruct.Pin = GPIO_PIN_10;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
